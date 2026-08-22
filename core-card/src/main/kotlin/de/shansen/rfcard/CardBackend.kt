@@ -75,9 +75,12 @@ sealed interface CardResponse {
 
 sealed interface CardCommand
 
+/**
+ * Cryptographic types persisted by RFIDGear. DF_KEY_DES covers RFIDGear's
+ * 16-byte DES/2K3DES-compatible representation; DF_KEY_3K3DES uses 24 bytes.
+ */
 enum class DesfireKeyType {
     DES,
-    TDES_2K,
     TDES_3K,
     AES
 }
