@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "de.shansen.liblogicalaccessnfc"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "de.shansen.liblogicalaccessnfc"
@@ -28,6 +29,7 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
