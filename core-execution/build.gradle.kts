@@ -1,5 +1,6 @@
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    id("java-library")
 }
 
 kotlin {
@@ -7,7 +8,7 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":core-project"))
+    api(project(":core-project"))
     testImplementation(kotlin("test-junit"))
     testImplementation("junit:junit:4.13.2")
 }
