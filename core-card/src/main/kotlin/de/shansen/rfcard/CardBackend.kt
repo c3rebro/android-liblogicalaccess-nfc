@@ -42,20 +42,19 @@ data class CardResult<T>(
 }
 
 /**
- * Runtime error vocabulary intentionally mirrors the stable semantic categories
- * needed by RFIDGear control flow. Backend-specific details belong in message/metadata,
- * not in branching logic.
+ * Exact runtime vocabulary from RFIDGear's ERROR enum.
+ * Keeping these names stable is required because .rfPrj task conditions compare them.
  */
 enum class CardError(val rfidGearName: String) {
-    NO_ERROR("NoError"),
     EMPTY("Empty"),
+    NO_ERROR("NoError"),
     AUTH_FAILURE("AuthFailure"),
+    PERMISSION_DENIED("PermissionDenied"),
+    PROTOCOL_CONSTRAINT("ProtocolConstraint"),
     TRANSPORT_ERROR("TransportError"),
-    WRONG_CARD("WrongCard"),
-    INVALID_ARGUMENT("InvalidArgument"),
-    OPERATION_NOT_SUPPORTED("OperationNotSupported"),
-    CARD_ERROR("CardError"),
-    UNKNOWN("Unknown");
+    UNKNOWN("Unknown"),
+    IS_NOT_TRUE("IsNotTrue"),
+    IS_NOT_FALSE("IsNotFalse");
 
     companion object {
         fun fromRfidGearName(value: String?): CardError =
