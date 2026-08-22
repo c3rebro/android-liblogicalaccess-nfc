@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-and-deploy.ps1" %*
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows-build.ps1" %*
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
