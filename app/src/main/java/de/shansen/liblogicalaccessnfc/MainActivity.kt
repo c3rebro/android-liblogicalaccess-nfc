@@ -9,6 +9,8 @@ import android.provider.OpenableColumns
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
+import de.shansen.rfidgearruntime.RfidGearAction
+import de.shansen.rfidgearruntime.RfidGearTaskCompiler
 import de.shansen.rfproject.RfExecutionPlanCompiler
 import de.shansen.rfproject.RfProjectReader
 import de.shansen.rfproject.RfProjectValidator
@@ -82,10 +84,25 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     appendLine()
 
                     plan?.steps?.forEach { step ->
+                        val projectTask = project.tasks[step.position]
+                        val compileStatus = runCatching { RfidGearTaskCompiler.compile(projectTask) }
+                            .fold(
+                                onSuccess = { compiled ->
+                                    when (val action = compiled.action) {
+                                        is RfidGearAction.Execute -> "SUPPORTED ${action.command.javaClass.simpleName}"
+                                        is RfidGearAction.CheckApplicationExists -> "SUPPORTED AppExistCheck"
+                                        is RfidGearAction.CheckApplicationKeyCount -> "SUPPORTED CheckAppKeyCount"
+                                        is RfidGearAction.Unsupported -> "UNSUPPORTED ${action.reason}"
+                                    }
+                                },
+                                onFailure = { error -> "INVALID ${error.message ?: error.javaClass.simpleName}" }
+                            )
+
                         append("[${step.position}] id=${step.id} ${step.modelType}")
                         append(" :: ${step.operation ?: "(no operation)"}")
                         step.description?.takeIf { it.isNotBlank() }?.let { append(" :: $it") }
                         appendLine()
+                        appendLine("    Android: $compileStatus")
                         step.condition?.let {
                             appendLine("    when task ${it.sourceTaskId} -> ${it.expectedError}")
                         }
@@ -106,6 +123,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                         appendLine()
                         appendLine("Validation: OK")
                     }
+
+                    appendLine()
+                    appendLine("Dry preview only: no card operation is executed from project tasks yet.")
                 }
             }
 
