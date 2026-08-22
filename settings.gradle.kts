@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "AndroidLibLogicalAccessNfc"
 include(":app")
+include(":core-project")
