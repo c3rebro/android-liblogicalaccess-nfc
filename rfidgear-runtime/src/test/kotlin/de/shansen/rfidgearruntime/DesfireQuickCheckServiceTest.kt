@@ -180,23 +180,28 @@ class DesfireQuickCheckServiceTest {
             DesfireGetFreeMemory -> CardResult.ok(CardResponse.DesfireFreeMemory(4096))
 
             is DesfireListApplications -> {
-                if (directoryKey == null) {
-                    CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = false))
-                } else if (command.piccMasterKey != null && sameKey(command.piccMasterKey, directoryKey)) {
-                    recordAuthentication(command.piccMasterKey)
-                    CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = true))
-                } else {
-                    command.piccMasterKey?.let(::recordAuthentication)
-                    CardResult.fail(CardError.PERMISSION_DENIED, "PICC directory listing denied")
+                val suppliedKey = command.piccMasterKey
+                when {
+                    directoryKey == null ->
+                        CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = false))
+                    suppliedKey != null && sameKey(suppliedKey, directoryKey) -> {
+                        recordAuthentication(suppliedKey)
+                        CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = true))
+                    }
+                    else -> {
+                        suppliedKey?.let(::recordAuthentication)
+                        CardResult.fail(CardError.PERMISSION_DENIED, "PICC directory listing denied")
+                    }
                 }
             }
 
             is DesfireReadApplicationSettings -> {
-                command.key?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
+                val suppliedKey = command.key
+                suppliedKey?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
                 val expected = protectedApps[command.appId]
                 when {
-                    expected == null -> CardResult.ok(publicSettings().copy(wasAuthenticated = command.key != null))
-                    command.key != null && sameKey(command.key, expected) -> CardResult.ok(
+                    expected == null -> CardResult.ok(publicSettings().copy(wasAuthenticated = suppliedKey != null))
+                    suppliedKey != null && sameKey(suppliedKey, expected) -> CardResult.ok(
                         publicSettings().copy(wasAuthenticated = true)
                     )
                     else -> CardResult.fail(CardError.PERMISSION_DENIED, "Application settings denied")
@@ -214,13 +219,14 @@ class DesfireQuickCheckServiceTest {
             }
 
             is DesfireListFiles -> {
-                command.key?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
+                val suppliedKey = command.key
+                suppliedKey?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
                 val expected = protectedApps[command.appId]
                 when {
                     expected == null -> CardResult.ok(
-                        CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = command.key != null)
+                        CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = suppliedKey != null)
                     )
-                    command.key != null && sameKey(command.key, expected) -> CardResult.ok(
+                    suppliedKey != null && sameKey(suppliedKey, expected) -> CardResult.ok(
                         CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = true)
                     )
                     else -> CardResult.fail(CardError.PERMISSION_DENIED, "File listing denied")
@@ -228,10 +234,11 @@ class DesfireQuickCheckServiceTest {
             }
 
             is DesfireReadFileSettings -> {
-                command.key?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
+                val suppliedKey = command.key
+                suppliedKey?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
                 val expected = protectedFileSettings[command.appId] ?: protectedApps[command.appId]
                 when {
-                    expected == null || (command.key != null && sameKey(command.key, expected)) -> CardResult.ok(
+                    expected == null || (suppliedKey != null && sameKey(suppliedKey, expected)) -> CardResult.ok(
                         CardResponse.DesfireFileSettings(
                             fileNo = command.fileNo,
                             fileType = DesfireFileType.STANDARD_DATA,
