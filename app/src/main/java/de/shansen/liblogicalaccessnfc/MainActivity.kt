@@ -13,12 +13,13 @@ import androidx.appcompat.app.AppCompatActivity
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
 import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
 import de.shansen.rfcard.DesfireKeyType
-import de.shansen.rfidgearruntime.DesfireApplicationQuickCheck
-import de.shansen.rfidgearruntime.DesfireQuickCheckAccess
 import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
 import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
-import de.shansen.rfidgearruntime.DesfireQuickCheckReport
+import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocument
+import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocumentFactory
+import de.shansen.rfidgearruntime.DesfireQuickCheckReportEnvironment
 import de.shansen.rfidgearruntime.DesfireQuickCheckService
+import de.shansen.rfidgearruntime.DesfireQuickCheckTextRenderer
 import de.shansen.rfidgearruntime.RfidGearAction
 import de.shansen.rfidgearruntime.RfidGearActionSafetyPolicy
 import de.shansen.rfidgearruntime.RfidGearTaskCompiler
@@ -26,6 +27,7 @@ import de.shansen.rfproject.RfExecutionPlanCompiler
 import de.shansen.rfproject.RfProjectReader
 import de.shansen.rfproject.RfProjectValidator
 import de.shansen.rfproject.RfValidationSeverity
+import java.time.OffsetDateTime
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
@@ -34,9 +36,32 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private val projectReader = RfProjectReader()
     private val quickCheckService = DesfireQuickCheckService()
     private var quickCheckConfig = DesfireQuickCheckConfig()
+    private var lastQuickCheckDocument: DesfireQuickCheckReportDocument? = null
 
     private val openProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadProject(uri)
+    }
+
+    private val createQuickCheckPdf = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val document = lastQuickCheckDocument ?: return@registerForActivityResult
+
+        Thread {
+            val result = runCatching {
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    DesfireQuickCheckPdfRenderer().write(document, output)
+                } ?: error("Unable to open the selected PDF destination.")
+            }
+            runOnUiThread {
+                result.onSuccess {
+                    binding.status.text = "Quick Check PDF exported."
+                }.onFailure { error ->
+                    binding.status.text = "PDF export failed: ${error.message ?: error.javaClass.simpleName}"
+                }
+            }
+        }.start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,6 +77,15 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
         binding.clearQuickCheckKeys.setOnClickListener {
             clearSessionQuickCheckKeys()
+        }
+        binding.exportQuickCheckPdf.setOnClickListener {
+            val document = lastQuickCheckDocument
+            if (document == null) {
+                binding.status.text = "Run a DESFire Quick Check before exporting a PDF."
+            } else {
+                val uid = document.card.uid.ifBlank { "unknown" }
+                createQuickCheckPdf.launch("desfire-quick-check-$uid.pdf")
+            }
         }
         updateQuickCheckKeySummary()
 
@@ -253,7 +287,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     override fun onTagDiscovered(tag: Tag) {
         val uidText = tag.id.toHex()
-        val techs = tag.techList.joinToString()
+        val techList = tag.techList.toList()
+        val techs = techList.joinToString()
 
         val isoDep = IsoDep.get(tag)
         if (isoDep == null) {
@@ -279,9 +314,21 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 backend = NativeDesfireCardBackend(tag.id),
                 config = quickCheckConfig
             )
+            val document = DesfireQuickCheckReportDocumentFactory.from(
+                report = report,
+                generatedAt = OffsetDateTime.now().toString(),
+                environment = DesfireQuickCheckReportEnvironment(
+                    nfcTechnologies = techList,
+                    maxTransceiveLength = isoDep.maxTransceiveLength,
+                    backendVersion = NativeBridge.version()
+                )
+            )
 
             runOnUiThread {
-                binding.details.text = formatQuickCheckReport(report, uidText, techs, isoDep.maxTransceiveLength)
+                lastQuickCheckDocument = document
+                binding.exportQuickCheckPdf.isEnabled = true
+                binding.details.text = DesfireQuickCheckTextRenderer.render(document)
+
                 val firstMissingKeyAid = report.needsKeys.firstOrNull()
                 binding.status.text = when {
                     report.error != null -> "Quick Check failed: ${report.errorMessage ?: report.error.rfidGearName}"
@@ -302,93 +349,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             NativeBridge.detachTransport()
             try { isoDep.close() } catch (_: Exception) {}
         }
-    }
-
-    private fun formatQuickCheckReport(
-        report: DesfireQuickCheckReport,
-        uidText: String,
-        techs: String,
-        maxTransceive: Int
-    ): String = buildString {
-        appendLine("DESFire Quick Check (READ ONLY)")
-        appendLine("UID: $uidText")
-        appendLine("Technologies: $techs")
-        appendLine("Max transceive: $maxTransceive")
-        appendLine("Native bridge: ${NativeBridge.version()}")
-
-        report.version?.let { version ->
-            appendLine(
-                "Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, " +
-                    "SW ${version.softwareMajor}.${version.softwareMinor}, " +
-                    "storage=0x%02X".format(version.hardwareStorageSize)
-            )
-            appendLine("Production: week=0x%02X year=%02d".format(version.productionWeek ?: 0, version.productionYear ?: 0))
-        }
-        report.freeMemoryBytes?.let { appendLine("Free memory: $it bytes") }
-
-        append("Application directory: ${report.directoryAccess}")
-        report.directoryAuthenticatedWith?.let { append(" using ${it.label} [${keyTypeLabel(it.type)} #${it.number}]") }
-        appendLine()
-
-        if (report.applications.isEmpty()) {
-            appendLine("Applications: none visible")
-        } else {
-            appendLine("Applications: ${report.applications.size}")
-            report.applications.forEach { app -> appendApplication(app) }
-        }
-
-        if (report.warnings.isNotEmpty()) {
-            appendLine("Warnings:")
-            report.warnings.forEach { appendLine("  - $it") }
-        }
-        report.error?.let {
-            appendLine("ERROR ${it.rfidGearName}: ${report.errorMessage.orEmpty()}")
-        }
-    }.trimEnd()
-
-    private fun StringBuilder.appendApplication(app: DesfireApplicationQuickCheck) {
-        appendLine()
-        appendLine("AID 0x%06X (%d)".format(app.aid, app.aid))
-        appendLine("  Settings: ${app.settingsAccess}")
-        app.settings?.let { settings ->
-            appendLine("    Key settings: 0x%02X".format(settings.keySettings))
-            settings.maxKeys?.let { appendLine("    Max keys: $it") }
-            settings.keyType?.let { appendLine("    Key type: ${keyTypeLabel(it)}") }
-        }
-        append("  File listing: ${app.filesAccess}")
-        app.authenticatedWith?.let { append(" using ${it.label} [${keyTypeLabel(it.type)} #${it.number}]") }
-        appendLine()
-
-        if (app.files.isEmpty()) {
-            appendLine("    Files: none/read denied")
-        } else {
-            app.files.forEach { file ->
-                append("    File ${file.fileNo}: ${file.access}")
-                file.settings?.let { settings ->
-                    append(" ${settings.fileType}")
-                    settings.size?.let { append(" size=$it") }
-                    append(" ${settings.communicationMode}")
-                    append(" R=${accessRight(settings.accessRights.read)}")
-                    append(" W=${accessRight(settings.accessRights.write)}")
-                    append(" RW=${accessRight(settings.accessRights.readWrite)}")
-                    append(" C=${accessRight(settings.accessRights.change)}")
-                }
-                file.message?.takeIf { it.isNotBlank() }?.let { append(" [$it]") }
-                appendLine()
-            }
-        }
-
-        if (app.attemptedKeys.isNotEmpty()) {
-            appendLine("  Tried keys:")
-            app.attemptedKeys.forEach { appendLine("    - ${it.label} [${keyTypeLabel(it.type)} #${it.number}]") }
-        }
-        app.message?.takeIf { it.isNotBlank() }?.let { appendLine("  Note: $it") }
-    }
-
-    private fun accessRight(value: Int): String = when (value) {
-        0x0E -> "FREE"
-        0x0F -> "NEVER"
-        else -> "KEY$value"
     }
 
     private fun ByteArray.toHex(): String =
