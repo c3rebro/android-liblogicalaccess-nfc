@@ -99,6 +99,7 @@ data class DesfireFormatResult(
  * - a preflight cannot be constructed by application/UI code;
  * - the confirmation target uses an immutable internal UID snapshot;
  * - execution requires an authorization created from the preflight confirmation phrase;
+ * - only PICC master key #0 can be used for FORMAT_PICC;
  * - the card UID is checked again before FORMAT_PICC is sent;
  * - a fresh DESFire GetVersion probe must succeed immediately before the destructive command;
  * - an authorization can authorize only one FORMAT_PICC attempt;
@@ -166,6 +167,16 @@ class DesfireFormatUseCase {
         authorization: DesfireFormatAuthorization,
         piccMasterKey: DesfireKey
     ): DesfireFormatResult {
+        if (piccMasterKey.number != 0) {
+            return DesfireFormatResult(
+                status = DesfireFormatStatus.FORMAT_FAILED,
+                identity = null,
+                formatCommandSent = false,
+                formatError = CardError.PROTOCOL_CONSTRAINT,
+                message = "DESFire FORMAT_PICC requires the PICC master key (key number 0)."
+            )
+        }
+
         val connect = backend.connect()
         if (!connect.isSuccess) {
             return DesfireFormatResult(
