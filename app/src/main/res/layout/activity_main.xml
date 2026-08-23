@@ -24,6 +24,29 @@
             android:textIsSelectable="true"
             android:typeface="monospace" />
 
+        <Button
+            android:id="@+id/addQuickCheckKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Add DESFire quick-check app key" />
+
+        <Button
+            android:id="@+id/clearQuickCheckKeys"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Clear session quick-check keys" />
+
+        <TextView
+            android:id="@+id/quickCheckKeySummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="No application-specific quick-check keys configured."
+            android:textIsSelectable="true"
+            android:typeface="monospace" />
+
         <TextView
             android:id="@+id/status"
             android:layout_width="match_parent"
