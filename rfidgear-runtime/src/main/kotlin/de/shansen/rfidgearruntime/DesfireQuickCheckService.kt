@@ -211,12 +211,13 @@ class DesfireQuickCheckService {
         val files = fileIds.distinct().sorted().map { fileNo ->
             // If application listing was already authenticated, start with that key.
             // Otherwise preserve the public-first behavior for file metadata as well.
+            val firstKey = preferredFileKey
             val firstResult = backend.execute(
                 DesfireReadFileSettings(
                     appId = aid,
                     fileNo = fileNo,
-                    key = preferredFileKey?.key,
-                    authenticateBeforeRead = preferredFileKey != null
+                    key = firstKey?.key,
+                    authenticateBeforeRead = firstKey != null
                 )
             )
             val firstValue = firstResult.responseAs<CardResponse.DesfireFileSettings>()
@@ -224,22 +225,20 @@ class DesfireQuickCheckService {
                 return@map DesfireFileQuickCheck(
                     fileNo = fileNo,
                     settings = firstValue,
-                    access = if (preferredFileKey != null || firstValue.wasAuthenticated == true) {
+                    access = if (firstKey != null || firstValue.wasAuthenticated == true) {
                         DesfireQuickCheckAccess.AUTHENTICATED
                     } else {
                         DesfireQuickCheckAccess.PUBLIC
                     },
-                    authenticatedWith = preferredFileKey?.ref()
+                    authenticatedWith = firstKey?.ref()
                 )
             }
 
             // Public file listing does not imply that GetFileSettings is public. If metadata
             // is protected, try AID-specific/global candidates before reporting KEY_REQUIRED.
-            val orderedCandidates = buildList {
-                preferredFileKey?.let(::add)
-                candidateKeys.forEach { candidate ->
-                    if (none { sameSecret(it, candidate) }) add(candidate)
-                }
+            // Do not immediately retry the key that was already used for firstResult.
+            val orderedCandidates = candidateKeys.filter { candidate ->
+                firstKey == null || !sameSecret(firstKey, candidate)
             }
 
             var lastResult = firstResult
@@ -405,7 +404,11 @@ data class DesfireQuickCheckReport(
         get() = applications
             .filter { app ->
                 app.filesAccess == DesfireQuickCheckAccess.KEY_REQUIRED ||
-                    app.files.any { it.access == DesfireQuickCheckAccess.KEY_REQUIRED }
+                    app.filesAccess == DesfireQuickCheckAccess.DENIED ||
+                    app.files.any {
+                        it.access == DesfireQuickCheckAccess.KEY_REQUIRED ||
+                            it.access == DesfireQuickCheckAccess.DENIED
+                    }
             }
             .map { it.aid }
             .distinct()
