@@ -79,6 +79,33 @@ class DesfireFormatUseCaseTest {
     }
 
     @Test
+    fun formatCommandRejectsNonPiccMasterKeyNumber() {
+        val wrongKey = DesfireKey(ByteArray(16), DesfireKeyType.AES, 1)
+
+        assertFailsWith<IllegalArgumentException> {
+            DesfireFormatCard(wrongKey)
+        }
+    }
+
+    @Test
+    fun useCaseRejectsNonPiccMasterKeyBeforeConnecting() {
+        val service = DesfireFormatUseCase()
+        val backend = FakeFormatBackend(uid = uid)
+        val preflight = requireNotNull(service.preflight(backend).value)
+        val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
+        val wrongKey = DesfireKey(ByteArray(16), DesfireKeyType.AES, 1)
+        val connectsBeforeExecute = backend.connectCalls
+
+        val result = service.execute(backend, authorization, wrongKey)
+
+        assertEquals(DesfireFormatStatus.FORMAT_FAILED, result.status)
+        assertEquals(CardError.PROTOCOL_CONSTRAINT, result.formatError)
+        assertFalse(result.formatCommandSent)
+        assertEquals(connectsBeforeExecute, backend.connectCalls)
+        assertEquals(0, backend.formatCalls)
+    }
+
+    @Test
     fun differentCardIsRejectedBeforeFormatCommand() {
         val service = DesfireFormatUseCase()
         val firstBackend = FakeFormatBackend(uid = uid)
@@ -200,10 +227,16 @@ class DesfireFormatUseCaseTest {
         private var apps = initialApps.toMutableList()
         private var formatCompleted = false
         var failVersion: Boolean = failVersion
+        var connectCalls: Int = 0
+            private set
         var formatCalls: Int = 0
             private set
 
-        override fun connect(): CardResult<Unit> = CardResult.ok(Unit)
+        override fun connect(): CardResult<Unit> {
+            connectCalls++
+            return CardResult.ok(Unit)
+        }
+
         override fun disconnect() = Unit
 
         override fun identify(): CardResult<CardIdentity> = CardResult.ok(
