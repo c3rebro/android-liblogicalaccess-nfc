@@ -13,7 +13,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -32,3 +32,6 @@ jobs:
 
       - name: Run hardware-independent tests
         run: gradle --no-daemon :core-project:test :core-execution:test :core-usecase:test :rfidgear-runtime:test
+
+      - name: Compile Android Kotlin/UI sources
+        run: gradle --no-daemon :app:compileDebugKotlin
