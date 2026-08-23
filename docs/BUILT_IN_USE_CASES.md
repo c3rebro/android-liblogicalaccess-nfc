@@ -20,24 +20,29 @@ Formatting is deliberately split into two phases.
 The app:
 
 1. identifies the card and requires MIFARE DESFire;
-2. reads version information where available;
+2. requires a successful DESFire `GetVersion` response as a positive protocol probe;
 3. tries to list applications without authentication;
-4. records the presented NFC UID;
+4. records an internal copy of the presented NFC UID;
 5. derives a confirmation phrase: `FORMAT <UID>`.
 
-No mutating command is sent during preflight.
+No mutating command is sent during preflight. `DesfireFormatPreflight` cannot be constructed by application/UI code; it is created inside `core-usecase` only after the positive DESFire probe. The confirmation target is based on a private UID snapshot, so mutating the public `CardIdentity.uid` byte array cannot change which card is authorized.
 
 ### 2. Destructive execution
 
 The core workflow already models the future execution contract:
 
 1. the user must explicitly confirm the exact preflight phrase;
-2. the card is presented again;
-3. its UID must match the preflight authorization;
-4. the PICC master key is supplied;
-5. `DesfireFormatCard` / DESFire `FORMAT_PICC` is sent at most once;
-6. failures never trigger an automatic destructive retry;
-7. verification is read-only and attempts to confirm that the application directory is empty.
+2. the resulting authorization is one-shot;
+3. the card is presented again;
+4. its UID must match the preflight authorization;
+5. a fresh DESFire `GetVersion` probe must succeed immediately before the destructive command;
+6. the PICC master key is supplied;
+7. `DesfireFormatCard` / DESFire `FORMAT_PICC` is sent at most once;
+8. failures never trigger an automatic destructive retry;
+9. any format attempt consumes the authorization, including authentication/transport failure;
+10. verification is read-only and attempts to confirm that the application directory is empty.
+
+A backend/card acknowledgement alone is not treated as verified success. `SUCCESS_VERIFIED` requires a successful post-format application-directory check showing no remaining applications. If `FORMAT_PICC` reports success but verification is unavailable, the result remains explicitly unverified.
 
 The current Android `NativeDesfireCardBackend` remains read-only and therefore cannot execute `DesfireFormatCard` yet. The UI exposes only the preflight and clearly states that no format command is sent.
 
