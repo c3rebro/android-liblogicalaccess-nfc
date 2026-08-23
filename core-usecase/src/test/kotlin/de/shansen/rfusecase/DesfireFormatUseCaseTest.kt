@@ -100,13 +100,13 @@ class DesfireFormatUseCaseTest {
 
         assertEquals(DesfireFormatStatus.FORMAT_FAILED, result.status)
         assertEquals(CardError.PROTOCOL_CONSTRAINT, result.formatError)
-        assertFalse(result.formatCommandSent)
+        assertFalse(result.destructiveOperationInvoked)
         assertEquals(connectsBeforeExecute, backend.connectCalls)
         assertEquals(0, backend.formatCalls)
     }
 
     @Test
-    fun differentCardIsRejectedBeforeFormatCommand() {
+    fun differentCardIsRejectedBeforeDestructiveOperation() {
         val service = DesfireFormatUseCase()
         val firstBackend = FakeFormatBackend(uid = uid)
         val preflight = requireNotNull(service.preflight(firstBackend).value)
@@ -116,14 +116,14 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(secondBackend, authorization, key)
 
         assertEquals(DesfireFormatStatus.CARD_MISMATCH, result.status)
-        assertFalse(result.formatCommandSent)
-        assertFalse(result.commandReportedSuccess)
+        assertFalse(result.destructiveOperationInvoked)
+        assertFalse(result.operationReportedSuccess)
         assertFalse(result.verifiedSuccess)
         assertEquals(0, secondBackend.formatCalls)
     }
 
     @Test
-    fun successfulFormatIsSentOnceAndVerifiedWithEmptyDirectory() {
+    fun successfulFormatIsInvokedOnceAndVerifiedWithEmptyDirectory() {
         val service = DesfireFormatUseCase()
         val backend = FakeFormatBackend(uid = uid, initialApps = listOf(0x123456, 0x654321))
         val preflight = requireNotNull(service.preflight(backend).value)
@@ -132,9 +132,9 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.SUCCESS_VERIFIED, result.status)
-        assertTrue(result.commandReportedSuccess)
+        assertTrue(result.operationReportedSuccess)
         assertTrue(result.verifiedSuccess)
-        assertTrue(result.formatCommandSent)
+        assertTrue(result.destructiveOperationInvoked)
         assertEquals(1, backend.formatCalls)
         assertEquals(emptyList(), result.remainingApplicationIds)
     }
@@ -150,8 +150,9 @@ class DesfireFormatUseCaseTest {
         val second = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.FORMAT_FAILED, first.status)
+        assertTrue(first.destructiveOperationInvoked)
         assertEquals(DesfireFormatStatus.AUTHORIZATION_CONSUMED, second.status)
-        assertFalse(second.formatCommandSent)
+        assertFalse(second.destructiveOperationInvoked)
         assertEquals(1, backend.formatCalls)
     }
 
@@ -169,7 +170,8 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.SUCCESS_UNVERIFIED, result.status)
-        assertTrue(result.commandReportedSuccess)
+        assertTrue(result.operationReportedSuccess)
+        assertTrue(result.destructiveOperationInvoked)
         assertFalse(result.verifiedSuccess)
         assertEquals(1, backend.formatCalls)
     }
@@ -184,7 +186,8 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.FORMAT_FAILED, result.status)
-        assertFalse(result.commandReportedSuccess)
+        assertTrue(result.destructiveOperationInvoked)
+        assertFalse(result.operationReportedSuccess)
         assertFalse(result.verifiedSuccess)
         assertEquals(CardError.AUTH_FAILURE, result.formatError)
         assertEquals(1, backend.formatCalls)
@@ -201,7 +204,7 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.FORMAT_FAILED, result.status)
-        assertFalse(result.formatCommandSent)
+        assertFalse(result.destructiveOperationInvoked)
         assertEquals(0, backend.formatCalls)
     }
 
