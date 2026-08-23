@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <EditText
+        android:id="@+id/aid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Application ID (decimal or 0x...)"
+        android:inputType="text" />
+
+    <EditText
+        android:id="@+id/label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="Key label"
+        android:inputType="text" />
+
+    <Spinner
+        android:id="@+id/keyType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" />
+
+    <EditText
+        android:id="@+id/keyNumber"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="Key number (0-15)"
+        android:inputType="number"
+        android:text="0" />
+
+    <EditText
+        android:id="@+id/keyHex"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:fontFamily="monospace"
+        android:hint="Key in hexadecimal"
+        android:inputType="textNoSuggestions"
+        android:maxLines="2" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="The key is kept only for the current app session and is not displayed again after saving."
+        android:textSize="12sp" />
+</LinearLayout>
