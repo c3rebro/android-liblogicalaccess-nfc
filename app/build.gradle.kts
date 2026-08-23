@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val llaConanDir = rootProject.file(".tools/conan/android-arm64").invariantSeparatorsPath
+
 android {
     namespace = "de.shansen.liblogicalaccessnfc"
     compileSdk = 35
@@ -18,6 +20,10 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += listOf("-std=c++17")
+                arguments += listOf(
+                    "-DLLA_CONAN_DIR=$llaConanDir",
+                    "-DANDROID_STL=c++_shared"
+                )
             }
         }
 
@@ -32,6 +38,8 @@ android {
             version = "3.22.1"
         }
     }
+
+    sourceSets["main"].jniLibs.srcDir(rootProject.file(".tools/jniLibs"))
 
     buildFeatures {
         viewBinding = true
