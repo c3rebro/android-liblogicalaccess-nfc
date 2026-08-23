@@ -87,9 +87,10 @@ data class DesfireFormatResult(
  * Built-in destructive DESFire format workflow.
  *
  * Safety invariants:
- * - preflight is read-only;
+ * - preflight is read-only and requires a successful DESFire GetVersion probe;
  * - execution requires an authorization created from the preflight confirmation phrase;
  * - the card UID is checked again before FORMAT_PICC is sent;
+ * - a fresh DESFire GetVersion probe must succeed immediately before the destructive command;
  * - an authorization can authorize only one FORMAT_PICC attempt;
  * - transport/auth failures never trigger an automatic destructive retry.
  */
@@ -116,15 +117,18 @@ class DesfireFormatUseCase {
                 )
             }
 
-            val warnings = mutableListOf<String>()
+            // The current Android ISO-DEP backend has a DESFire-oriented identity wrapper.
+            // Require a real DESFire command response before creating any destructive authorization.
             val versionResult = backend.execute(DesfireGetVersion)
-            val version = if (versionResult.isSuccess) {
-                versionResult.value as? CardResponse.DesfireVersion
-            } else {
-                warnings += versionResult.message ?: "DESFire version could not be read during preflight."
-                null
+            val version = versionResult.value as? CardResponse.DesfireVersion
+            if (!versionResult.isSuccess || version == null) {
+                return CardResult.fail(
+                    if (versionResult.isSuccess) CardError.PROTOCOL_CONSTRAINT else versionResult.error,
+                    versionResult.message ?: "DESFire GetVersion probe failed; format preflight is not authorized."
+                )
             }
 
+            val warnings = mutableListOf<String>()
             val directoryResult = backend.execute(DesfireListApplications())
             val applications = if (directoryResult.isSuccess) {
                 (directoryResult.value as? CardResponse.ApplicationIds)?.aids
@@ -186,8 +190,22 @@ class DesfireFormatUseCase {
                 )
             }
 
-            // Consume only after the correct card is present, immediately before the destructive command.
-            // A transport/auth failure still consumes the authorization: a retry requires new preflight + confirmation.
+            // Positive protocol probe immediately before the destructive command. Do not trust
+            // ISO-DEP presence / the backend wrapper alone as proof that this is a DESFire PICC.
+            val versionProbe = backend.execute(DesfireGetVersion)
+            if (!versionProbe.isSuccess || versionProbe.value !is CardResponse.DesfireVersion) {
+                return DesfireFormatResult(
+                    status = DesfireFormatStatus.FORMAT_FAILED,
+                    identity = identity.copy(uid = identity.uid.copyOf()),
+                    formatCommandSent = false,
+                    formatError = if (versionProbe.isSuccess) CardError.PROTOCOL_CONSTRAINT else versionProbe.error,
+                    message = versionProbe.message ?: "DESFire GetVersion probe failed immediately before format; no format command was sent."
+                )
+            }
+
+            // Consume only after the correct card and protocol have been positively re-verified,
+            // immediately before the destructive command. A format failure still consumes the
+            // authorization: a retry requires new preflight + confirmation.
             if (!authorization.consume()) {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.AUTHORIZATION_CONSUMED,
