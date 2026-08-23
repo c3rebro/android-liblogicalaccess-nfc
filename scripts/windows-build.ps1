@@ -11,12 +11,16 @@ $GradleVersion = '8.11.1'
 $GradleSha256 = 'f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6'
 $CmdToolsVersion = '15859902'
 $CmdToolsSha256 = '90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a'
+$ConanVersion = '2.31.1'
+$LlaVersion = '3.7.0'
+$NdkVersion = '27.0.12077973'
+$CMakeVersion = '3.22.1'
 $SdkPackages = @(
     'platform-tools',
     'platforms;android-35',
     'build-tools;35.0.0',
-    'ndk;27.0.12077973',
-    'cmake;3.22.1'
+    "ndk;$NdkVersion",
+    "cmake;$CMakeVersion"
 )
 $AppId = 'de.shansen.liblogicalaccessnfc'
 $Activity = '.MainActivity'
@@ -138,6 +142,216 @@ function Ensure-AndroidSdk([string]$Sdk) {
     Set-Content (Join-Path $Root 'local.properties') "sdk.dir=$($Sdk.Replace('\','/'))" -Encoding ASCII
 }
 
+function Find-Git {
+    $cmd = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles 'Git\cmd\git.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.exe')
+    )) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+    return $null
+}
+
+function Ensure-Git {
+    $git = Find-Git
+    if ($git) { return $git }
+
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if (-not $winget) { Fail 'Git is required to fetch liblogicalaccess 3.7.0.' }
+    Step 'Installing Git via winget'
+    & $winget.Source install --id Git.Git -e
+    if ($LASTEXITCODE -ne 0) { Fail 'Git installation failed.' }
+    $git = Find-Git
+    if (-not $git) { Fail 'Git could not be located after installation.' }
+    return $git
+}
+
+function Find-Python {
+    $cmd = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($cmd) {
+        try {
+            $version = (& $cmd.Source -c 'import sys; print(sys.version_info.major)').Trim()
+            if ($version -eq '3') { return $cmd.Source }
+        } catch {}
+    }
+
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($py) {
+        try {
+            $path = (& $py.Source -3 -c 'import sys; print(sys.executable)').Trim()
+            if ($path -and (Test-Path $path)) { return $path }
+        } catch {}
+    }
+
+    $pythonRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    if (Test-Path $pythonRoot) {
+        $candidate = Get-ChildItem $pythonRoot -Directory -Filter 'Python3*' -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'python.exe' } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+        if ($candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Ensure-Python {
+    $python = Find-Python
+    if ($python) { return $python }
+
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if (-not $winget) { Fail 'Python 3 is required for the project-local Conan environment.' }
+    Step 'Installing Python 3.12 via winget'
+    & $winget.Source install --id Python.Python.3.12 -e
+    if ($LASTEXITCODE -ne 0) { Fail 'Python installation failed.' }
+    $python = Find-Python
+    if (-not $python) { Fail 'Python could not be located after installation.' }
+    return $python
+}
+
+function Ensure-Conan([string]$Python) {
+    $venv = Join-Path $Root '.tools\conan-venv'
+    $venvPython = Join-Path $venv 'Scripts\python.exe'
+    $conan = Join-Path $venv 'Scripts\conan.exe'
+
+    if (-not (Test-Path $venvPython)) {
+        Step 'Creating project-local Python environment for Conan'
+        New-Item -ItemType Directory -Force (Split-Path -Parent $venv) | Out-Null
+        & $Python -m venv $venv
+        if ($LASTEXITCODE -ne 0) { Fail 'Unable to create Conan Python virtual environment.' }
+    }
+
+    $installedVersion = $null
+    if (Test-Path $conan) {
+        try {
+            $line = (& $conan --version).Trim()
+            if ($line -match 'Conan version ([0-9.]+)') { $installedVersion = $Matches[1] }
+        } catch {}
+    }
+
+    if ($installedVersion -ne $ConanVersion) {
+        Step "Installing Conan $ConanVersion into project-local environment"
+        & $venvPython -m pip install --disable-pip-version-check --upgrade "conan==$ConanVersion"
+        if ($LASTEXITCODE -ne 0) { Fail 'Conan installation failed.' }
+    }
+
+    if (-not (Test-Path $conan)) { Fail 'conan.exe was not created in the project-local environment.' }
+    return $conan
+}
+
+function Prepare-LibLogicalAccess([string]$Sdk, [string]$Git, [string]$Conan) {
+    $ndk = Join-Path $Sdk "ndk\$NdkVersion"
+    $cmakeBin = Join-Path $Sdk "cmake\$CMakeVersion\bin"
+    $clang = Join-Path $ndk 'toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe'
+    $ninja = Join-Path $cmakeBin 'ninja.exe'
+
+    if (-not (Test-Path $ndk)) { Fail "Android NDK $NdkVersion not found at $ndk" }
+    if (-not (Test-Path $clang)) { Fail "NDK clang++ not found: $clang" }
+    if (-not (Test-Path $ninja)) { Fail "Ninja not found in Android CMake package: $ninja" }
+
+    $clangVersionLine = (& $clang --version | Select-Object -First 1).ToString()
+    if ($clangVersionLine -notmatch 'clang version ([0-9]+)') {
+        Fail "Unable to determine NDK clang version from: $clangVersionLine"
+    }
+    $clangMajor = $Matches[1]
+
+    $env:Path = "$cmakeBin;$env:Path"
+
+    Step "Preparing liblogicalaccess $LlaVersion for Android arm64"
+    & $Conan profile detect --force
+    if ($LASTEXITCODE -ne 0) { Fail 'Conan build profile detection failed.' }
+
+    $tools = Join-Path $Root '.tools'
+    New-Item -ItemType Directory -Force $tools | Out-Null
+
+    $profile = Join-Path $tools 'conan-android-arm64.profile'
+    $ndkForConan = $ndk.Replace('\', '/')
+    @"
+include(default)
+
+[settings]
+os=Android
+os.api_level=26
+arch=armv8
+compiler=clang
+compiler.version=$clangMajor
+compiler.libcxx=c++_shared
+compiler.cppstd=17
+build_type=Debug
+
+[conf]
+tools.android:ndk_path=$ndkForConan
+tools.cmake.cmaketoolchain:generator=Ninja
+"@ | Set-Content $profile -Encoding ASCII
+
+    $source = Join-Path $tools "liblogicalaccess-$LlaVersion"
+    $needsClone = -not (Test-Path (Join-Path $source '.git'))
+    if (-not $needsClone) {
+        try {
+            $tag = (& $Git -C $source describe --tags --exact-match 2>$null).Trim()
+            if ($tag -ne $LlaVersion) { $needsClone = $true }
+        } catch { $needsClone = $true }
+    }
+
+    if ($needsClone) {
+        Remove-Item $source -Recurse -Force -ErrorAction SilentlyContinue
+        & $Git clone --depth 1 --branch $LlaVersion https://github.com/liblogicalaccess/liblogicalaccess.git $source
+        if ($LASTEXITCODE -ne 0) { Fail "Unable to clone liblogicalaccess tag $LlaVersion." }
+    }
+
+    # Build only the public Android subset. PKCS/libusb are intentionally disabled;
+    # they are not needed for phone NFC Quick Check and would add unrelated dependencies.
+    & $Conan create $source `
+        '-pr:h' $profile '-pr:b' default `
+        '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_PKCS=False" `
+        '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_LIBUSB=False" `
+        '--build=missing' '--test-folder='
+    if ($LASTEXITCODE -ne 0) { Fail 'Conan build of liblogicalaccess for Android failed.' }
+
+    $conanOut = Join-Path $tools 'conan\android-arm64'
+    $deploy = Join-Path $tools 'conan-deploy\android-arm64'
+    Remove-Item $conanOut -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $deploy -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $conanOut | Out-Null
+    New-Item -ItemType Directory -Force $deploy | Out-Null
+
+    & $Conan install (Join-Path $Root 'native') `
+        '-of' $conanOut `
+        '-pr:h' $profile '-pr:b' default `
+        '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_PKCS=False" `
+        '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_LIBUSB=False" `
+        '--build=missing' `
+        '--deployer=full_deploy' '--deployer-folder' $deploy `
+        '-c:h' 'tools.deployer:symlinks=False'
+    if ($LASTEXITCODE -ne 0) { Fail 'Conan install/deploy for liblogicalaccess failed.' }
+
+    $config = Get-ChildItem $conanOut -Recurse -File -Filter 'logicalaccess-config.cmake' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $config) { Fail "CMakeDeps did not generate logicalaccess-config.cmake under $conanOut" }
+
+    # CMakeDeps can place generators in a nested folder depending on Conan layout.
+    # CMake receives the exact folder containing logicalaccess-config.cmake.
+    if ($config.Directory.FullName -ne $conanOut) {
+        Get-ChildItem $config.Directory.FullName -File | Copy-Item -Destination $conanOut -Force
+    }
+
+    $jniRoot = Join-Path $tools 'jniLibs\arm64-v8a'
+    Remove-Item $jniRoot -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $jniRoot | Out-Null
+
+    $hostDeploy = Join-Path $deploy 'full_deploy\host'
+    if (-not (Test-Path $hostDeploy)) { Fail "Conan host deployment not found: $hostDeploy" }
+    $sharedLibraries = @(Get-ChildItem $hostDeploy -Recurse -File -Filter '*.so' -ErrorAction SilentlyContinue)
+    if ($sharedLibraries.Count -eq 0) { Fail 'No Android shared libraries were produced by the Conan deployment.' }
+
+    foreach ($library in $sharedLibraries) {
+        Copy-Item $library.FullName (Join-Path $jniRoot $library.Name) -Force
+    }
+
+    Write-Host "liblogicalaccess $LlaVersion prepared; $($sharedLibraries.Count) Android shared libraries staged." -ForegroundColor Green
+}
+
 function Ensure-Gradle {
     $tools = Join-Path $Root '.tools'
     $home = Join-Path $tools "gradle-$GradleVersion"
@@ -162,6 +376,12 @@ try {
     $sdk = Get-SdkRoot
     Write-Host "ANDROID_HOME=$sdk"
     Ensure-AndroidSdk $sdk
+
+    $git = Ensure-Git
+    $python = Ensure-Python
+    $conan = Ensure-Conan $python
+    Prepare-LibLogicalAccess $sdk $git $conan
+
     $gradle = Ensure-Gradle
 
     Step 'Running RFIDGear project/runtime tests and building app-debug.apk'
@@ -208,7 +428,7 @@ try {
     if (-not $appProcessId) { Fail 'App was installed but is not running after launch.' }
 
     Write-Host "`nSUCCESS - tests passed and app is running on $serial (PID $appProcessId)." -ForegroundColor Green
-    Write-Host 'Load an RFIDGear .rfPrj file in the app, then present an ISO-DEP NFC card.' -ForegroundColor Green
+    Write-Host 'Present a DESFire card to run the read-only Quick Check.' -ForegroundColor Green
     exit 0
 }
 catch {
