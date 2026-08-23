@@ -1,0 +1,234 @@
+package de.shansen.rfidgearruntime
+
+import de.shansen.rfcard.*
+import org.junit.Assert.*
+import org.junit.Test
+
+class DesfireQuickCheckServiceTest {
+
+    private val zeroAes = DesfireQuickCheckKey(
+        "default-aes",
+        DesfireKey(ByteArray(16), DesfireKeyType.AES, 0)
+    )
+
+    private val appSpecific = DesfireQuickCheckKey(
+        "door-app",
+        DesfireKey(ByteArray(16) { 0x11 }, DesfireKeyType.AES, 0)
+    )
+
+    @Test
+    fun `public application is inspected without authentication`() {
+        val backend = FakeQuickCheckBackend(
+            protectedApps = emptyMap()
+        )
+
+        val report = DesfireQuickCheckService().run(
+            backend,
+            DesfireQuickCheckConfig(defaultApplicationKeys = listOf(zeroAes))
+        )
+
+        assertNull(report.error)
+        assertEquals(DesfireQuickCheckAccess.PUBLIC, report.directoryAccess)
+        assertEquals(1, report.applications.size)
+        assertEquals(DesfireQuickCheckAccess.PUBLIC, report.applications.single().filesAccess)
+        assertNull(report.applications.single().authenticatedWith)
+        assertEquals(0, backend.authenticationAttempts)
+    }
+
+    @Test
+    fun `protected application uses aid specific key when public listing fails`() {
+        val backend = FakeQuickCheckBackend(
+            protectedApps = mapOf(0x123456 to appSpecific.key)
+        )
+
+        val report = DesfireQuickCheckService().run(
+            backend,
+            DesfireQuickCheckConfig(
+                defaultApplicationKeys = listOf(zeroAes),
+                applicationKeys = mapOf(0x123456 to listOf(appSpecific))
+            )
+        )
+
+        val app = report.applications.single()
+        assertEquals(0x123456, app.aid)
+        assertEquals(DesfireQuickCheckAccess.AUTHENTICATED, app.filesAccess)
+        assertEquals("door-app", app.authenticatedWith?.label)
+        assertEquals(1, backend.authenticationAttempts)
+        assertTrue(report.needsKeys.isEmpty())
+    }
+
+    @Test
+    fun `protected application without configured key is reported as key required`() {
+        val backend = FakeQuickCheckBackend(
+            protectedApps = mapOf(0x123456 to appSpecific.key)
+        )
+
+        val report = DesfireQuickCheckService().run(backend, DesfireQuickCheckConfig())
+
+        val app = report.applications.single()
+        assertEquals(DesfireQuickCheckAccess.KEY_REQUIRED, app.filesAccess)
+        assertEquals(listOf(0x123456), report.needsKeys)
+        assertTrue(app.message!!.contains("Define a key"))
+        assertEquals(0, backend.authenticationAttempts)
+    }
+
+    @Test
+    fun `aid specific key is tried before global defaults`() {
+        val backend = FakeQuickCheckBackend(
+            protectedApps = mapOf(0x123456 to appSpecific.key)
+        )
+
+        val report = DesfireQuickCheckService().run(
+            backend,
+            DesfireQuickCheckConfig(
+                defaultApplicationKeys = listOf(zeroAes),
+                applicationKeys = mapOf(0x123456 to listOf(appSpecific))
+            )
+        )
+
+        assertEquals(DesfireQuickCheckAccess.AUTHENTICATED, report.applications.single().filesAccess)
+        assertEquals(1, backend.authenticationAttempts)
+        assertTrue(backend.authenticatedKeys.single().contentEquals(appSpecific.key.bytes))
+    }
+
+    @Test
+    fun `directory listing can fall back to configured picc key`() {
+        val piccKey = DesfireQuickCheckKey(
+            "picc",
+            DesfireKey(ByteArray(16) { 0x22 }, DesfireKeyType.AES, 0)
+        )
+        val backend = FakeQuickCheckBackend(
+            directoryKey = piccKey.key
+        )
+
+        val report = DesfireQuickCheckService().run(
+            backend,
+            DesfireQuickCheckConfig(piccKeys = listOf(piccKey))
+        )
+
+        assertNull(report.error)
+        assertEquals(DesfireQuickCheckAccess.AUTHENTICATED, report.directoryAccess)
+        assertEquals("picc", report.directoryAuthenticatedWith?.label)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `3k3des key must contain 24 bytes`() {
+        DesfireKey(ByteArray(16), DesfireKeyType.TDES_3K, 0)
+    }
+
+    private class FakeQuickCheckBackend(
+        private val protectedApps: Map<Int, DesfireKey> = emptyMap(),
+        private val directoryKey: DesfireKey? = null
+    ) : CardBackend {
+
+        var authenticationAttempts = 0
+        val authenticatedKeys = mutableListOf<ByteArray>()
+        private val aids = if (protectedApps.isEmpty()) listOf(0x123456) else protectedApps.keys.toList()
+
+        override fun connect(): CardResult<Unit> = CardResult.ok(Unit)
+        override fun disconnect() = Unit
+
+        override fun identify(): CardResult<CardIdentity> = CardResult.ok(
+            CardIdentity(byteArrayOf(1, 2, 3, 4), CardTechnology.MIFARE_DESFIRE, "test")
+        )
+
+        override fun execute(command: CardCommand): CardResult<CardResponse> = when (command) {
+            DesfireGetVersion -> CardResult.ok(
+                CardResponse.DesfireVersion(
+                    hardwareVendor = 0x04,
+                    hardwareType = 0x01,
+                    hardwareSubType = 0,
+                    hardwareMajor = 1,
+                    hardwareMinor = 0,
+                    hardwareStorageSize = 0x1A,
+                    hardwareProtocol = 0x05,
+                    softwareVendor = 0x04,
+                    softwareType = 0x01,
+                    softwareSubType = 0,
+                    softwareMajor = 1,
+                    softwareMinor = 0,
+                    softwareStorageSize = 0x1A,
+                    softwareProtocol = 0x05
+                )
+            )
+
+            DesfireGetFreeMemory -> CardResult.ok(CardResponse.DesfireFreeMemory(4096))
+
+            is DesfireListApplications -> {
+                if (directoryKey == null) {
+                    CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = false))
+                } else if (command.piccMasterKey != null && sameKey(command.piccMasterKey, directoryKey)) {
+                    CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = true))
+                } else {
+                    CardResult.fail(CardError.PERMISSION_DENIED, "PICC directory listing denied")
+                }
+            }
+
+            is DesfireReadApplicationSettings -> {
+                val expected = protectedApps[command.appId]
+                when {
+                    expected == null -> CardResult.ok(publicSettings())
+                    command.key != null && sameKey(command.key, expected) -> CardResult.ok(
+                        publicSettings().copy(wasAuthenticated = true)
+                    )
+                    else -> CardResult.fail(CardError.PERMISSION_DENIED, "Application settings denied")
+                }
+            }
+
+            is DesfireAuthenticate -> {
+                authenticationAttempts++
+                authenticatedKeys += command.key.bytes.copyOf()
+                val expected = protectedApps[command.appId]
+                if (expected != null && sameKey(command.key, expected)) {
+                    CardResult.ok(CardResponse.Empty)
+                } else {
+                    CardResult.fail(CardError.AUTH_FAILURE, "Wrong key")
+                }
+            }
+
+            is DesfireListFiles -> {
+                val expected = protectedApps[command.appId]
+                when {
+                    expected == null -> CardResult.ok(
+                        CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = false)
+                    )
+                    command.key != null && sameKey(command.key, expected) -> CardResult.ok(
+                        CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = true)
+                    )
+                    else -> CardResult.fail(CardError.PERMISSION_DENIED, "File listing denied")
+                }
+            }
+
+            is DesfireReadFileSettings -> {
+                val expected = protectedApps[command.appId]
+                when {
+                    expected == null || (command.key != null && sameKey(command.key, expected)) -> CardResult.ok(
+                        CardResponse.DesfireFileSettings(
+                            fileNo = command.fileNo,
+                            fileType = DesfireFileType.STANDARD_DATA,
+                            communicationMode = DesfireCommunicationMode.PLAIN,
+                            accessRights = DesfireAccessRights(0, 0, 0, 0),
+                            size = 32,
+                            wasAuthenticated = expected != null
+                        )
+                    )
+                    else -> CardResult.fail(CardError.PERMISSION_DENIED, "File settings denied")
+                }
+            }
+
+            else -> CardResult.fail(CardError.UNKNOWN, "Unsupported fake command ${command.javaClass.simpleName}")
+        }
+
+        private fun publicSettings() = CardResponse.DesfireApplicationSettings(
+            keySettings = 0x0B,
+            maxKeys = 5,
+            keyType = DesfireKeyType.AES,
+            wasAuthenticated = false
+        )
+
+        private fun sameKey(left: DesfireKey, right: DesfireKey): Boolean =
+            left.type == right.type &&
+                left.number == right.number &&
+                left.bytes.contentEquals(right.bytes)
+    }
+}
