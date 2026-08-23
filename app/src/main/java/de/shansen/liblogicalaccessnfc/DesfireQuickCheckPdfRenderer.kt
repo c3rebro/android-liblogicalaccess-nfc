@@ -20,8 +20,16 @@ class DesfireQuickCheckPdfRenderer {
             var page: PdfDocument.Page? = null
             var y = 0f
 
+            fun finishCurrentPage() {
+                page?.let { current ->
+                    drawFooter(current, pageNumber)
+                    pdf.finishPage(current)
+                    page = null
+                }
+            }
+
             fun startPage() {
-                page?.let(pdf::finishPage)
+                finishCurrentPage()
                 pageNumber++
                 val info = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
                 page = pdf.startPage(info)
@@ -56,10 +64,7 @@ class DesfireQuickCheckPdfRenderer {
                 if (style.addAfter > 0f) y += style.addAfter
             }
 
-            page?.let {
-                drawFooter(it, pageNumber)
-                pdf.finishPage(it)
-            }
+            finishCurrentPage()
             pdf.writeTo(output)
         } finally {
             pdf.close()
