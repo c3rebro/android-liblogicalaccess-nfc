@@ -389,8 +389,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             binding.details.text = DesfireQuickCheckTextRenderer.render(document)
 
             val firstMissingKeyAid = report.needsKeys.firstOrNull()
+            val reportError = report.error
             binding.status.text = when {
-                report.error != null -> "Quick Check failed: ${report.errorMessage ?: report.error.rfidGearName}"
+                reportError != null -> "Quick Check failed: ${report.errorMessage ?: reportError.rfidGearName}"
                 firstMissingKeyAid != null -> "Quick Check partial: AID 0x%06X requires authentication.".format(firstMissingKeyAid)
                 else -> "Quick Check complete (read-only)."
             }
@@ -414,13 +415,19 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
             updateActiveUseCaseSummary()
 
-            if (!result.isSuccess || result.value == null) {
+            if (!result.isSuccess) {
                 binding.status.text = "Format preflight failed: ${result.message ?: result.error.rfidGearName}"
                 binding.details.text = "UID: $uidText\nNo format command was sent."
                 return@runOnUiThread
             }
 
             val preflight = result.value
+            if (preflight == null) {
+                binding.status.text = "Format preflight failed: backend returned no preflight result."
+                binding.details.text = "UID: $uidText\nNo format command was sent."
+                return@runOnUiThread
+            }
+
             lastFormatPreflight = preflight
             binding.status.text = "Format preflight complete (read only). No format command was sent."
             binding.details.text = formatFormatPreflight(preflight)
@@ -431,19 +438,23 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private fun formatFormatPreflight(preflight: DesfireFormatPreflight): String = buildString {
         appendLine("DESFire Format Preflight (READ ONLY)")
         appendLine("UID: ${preflight.identity.uid.toHex()}")
-        preflight.version?.let {
-            appendLine("Version: HW ${it.hardwareMajor}.${it.hardwareMinor}, SW ${it.softwareMajor}.${it.softwareMinor}")
-        }
-        if (preflight.visibleApplicationIds == null) {
-            appendLine("Applications: protected/unavailable during public preflight")
-        } else if (preflight.visibleApplicationIds.isEmpty()) {
-            appendLine("Applications: none visible")
-        } else {
-            appendLine("Applications: ${preflight.visibleApplicationIds.size}")
-            preflight.visibleApplicationIds.sorted().forEach { aid ->
-                appendLine("  - AID 0x%06X".format(aid))
+        val version = preflight.version
+        appendLine("Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, SW ${version.softwareMajor}.${version.softwareMinor}")
+
+        val applicationIds = preflight.visibleApplicationIds
+        when {
+            applicationIds == null ->
+                appendLine("Applications: protected/unavailable during public preflight")
+            applicationIds.isEmpty() ->
+                appendLine("Applications: none visible")
+            else -> {
+                appendLine("Applications: ${applicationIds.size}")
+                applicationIds.sorted().forEach { aid ->
+                    appendLine("  - AID 0x%06X".format(aid))
+                }
             }
         }
+
         if (preflight.warnings.isNotEmpty()) {
             appendLine("Warnings:")
             preflight.warnings.forEach { appendLine("  - $it") }
