@@ -17,6 +17,7 @@ The application is intentionally split into a project parser/compiler, a determi
         v
 +-------------------+
 | rfidgear-runtime  |  persisted RFIDGear fields -> typed card actions
+|                   |  DESFire Quick Check orchestration
 +-------------------+
         |
         +--------------------+
@@ -74,6 +75,25 @@ Explicitly blocked until their desktop semantics are completely mapped:
 
 The app currently remains **dry-preview only for project tasks**. Loading a project does not execute encoding commands on a card.
 
+## DESFire Quick Check
+
+A platform-neutral, non-destructive Quick Check runtime is now implemented in `rfidgear-runtime` and covered by Fake-Backend unit tests.
+
+The scanner:
+
+1. identifies the DESFire card;
+2. reads version/free-memory metadata where supported;
+3. attempts public application-directory listing first;
+4. falls back to configured PICC keys only when directory listing requires authentication;
+5. inspects every discovered application;
+6. attempts application/file metadata without authentication first;
+7. tries AID-specific application keys before global defaults only when listing is denied;
+8. reports `PUBLIC`, `AUTHENTICATED`, `KEY_REQUIRED`, `DENIED` or `UNAVAILABLE` rather than treating every successful metadata read as proof of authentication.
+
+The Android app already has a session-only editor for AID-specific Quick Check keys. Key values are validated, kept in memory and never shown again after saving. The report model exposes `needsKeys`, allowing the future native scan flow to prompt directly for the protected AID and retry it on the next card presentation.
+
+See [`docs/DESFIRE_QUICK_CHECK.md`](docs/DESFIRE_QUICK_CHECK.md).
+
 ## Android NFC state
 
 - Kotlin Android app
@@ -83,6 +103,7 @@ The app currently remains **dry-preview only for project tasks**. Loading a proj
 - raw `IsoDep.transceive()` transport
 - JNI/native C++ bridge
 - CMake integration point
+- session-only DESFire Quick Check application-key editor
 
 The official `liblogicalaccess/liblogicalaccess-android` project confirms the same architectural pattern: an Android-side NFC transport forwards byte commands to the native liblogicalaccess reader implementation. Its source is useful as a reference, but it contains application-specific hard-coded Java package names, so this project uses its own clean transport boundary rather than copying those dependencies wholesale.
 
@@ -119,8 +140,8 @@ build-and-deploy.bat -SkipLaunch
 
 ## Next implementation boundary
 
-The next hardware milestone is not to execute arbitrary `.rfPrj` files immediately. It is to connect the typed `core-card` DESFire commands to liblogicalaccess through Android `IsoDep`, beginning with non-destructive identification/authentication/read operations and a dry-run/audit path. Destructive operations will only be enabled after their project mapping and result semantics are covered by fixtures/tests.
+The immediate hardware milestone is to implement the `core-card` Quick Check primitives in a native liblogicalaccess-backed `CardBackend` over Android `IsoDep`. The first real-card path remains read-only: version, free memory, application IDs, authentication, key settings, file IDs and file settings. Destructive `.rfPrj` execution remains disabled until this path is proven on a physical device.
 
 ## Security
 
-This is an encoding tool, so project files and keys are security-sensitive inputs. The runtime therefore treats project XML as untrusted, limits ZIP/XML sizes, disables external XML entities, avoids logging secret fields, and keeps card keys out of UI-layer logic. Production key storage/provisioning is still an open design item and must not be implemented by hard-coding secrets into the APK.
+This is an encoding tool, so project files and keys are security-sensitive inputs. The runtime therefore treats project XML as untrusted, limits ZIP/XML sizes, disables external XML entities, avoids logging secret fields, and keeps card keys out of UI-layer logging. Quick Check keys are currently session-only and are not persisted. Persistent key storage/provisioning is a separate design item and must use Android Keystore-backed protection rather than plaintext preferences or hard-coded APK secrets.
