@@ -75,7 +75,13 @@ enum class DesfireFormatStatus {
 data class DesfireFormatResult(
     val status: DesfireFormatStatus,
     val identity: CardIdentity?,
-    val formatCommandSent: Boolean,
+    /**
+     * True once the core invoked the backend's destructive [DesfireFormatCard] operation.
+     *
+     * This deliberately does not claim that a FORMAT_PICC APDU reached the card: the backend
+     * may still fail while selecting/authenticating before it sends the destructive APDU.
+     */
+    val destructiveOperationInvoked: Boolean,
     val formatError: CardError? = null,
     val message: String? = null,
     val remainingApplicationIds: List<Int>? = null
@@ -84,8 +90,8 @@ data class DesfireFormatResult(
     val verifiedSuccess: Boolean
         get() = status == DesfireFormatStatus.SUCCESS_VERIFIED
 
-    /** The card/backend reported FORMAT_PICC success, even if verification was unavailable/failed. */
-    val commandReportedSuccess: Boolean
+    /** The backend reported the destructive format operation as successful. */
+    val operationReportedSuccess: Boolean
         get() = status == DesfireFormatStatus.SUCCESS_VERIFIED ||
             status == DesfireFormatStatus.SUCCESS_UNVERIFIED ||
             status == DesfireFormatStatus.VERIFICATION_FAILED
@@ -100,10 +106,11 @@ data class DesfireFormatResult(
  * - the confirmation target uses an immutable internal UID snapshot;
  * - execution requires an authorization created from the preflight confirmation phrase;
  * - only PICC master key #0 can be used for FORMAT_PICC;
- * - the card UID is checked again before FORMAT_PICC is sent;
- * - a fresh DESFire GetVersion probe must succeed immediately before the destructive command;
- * - an authorization can authorize only one FORMAT_PICC attempt;
- * - transport/auth failures never trigger an automatic destructive retry.
+ * - the card UID is checked again before the destructive backend operation is invoked;
+ * - a fresh DESFire GetVersion probe must succeed immediately before that operation;
+ * - an authorization can authorize only one destructive backend invocation;
+ * - the core never retries the destructive operation automatically;
+ * - a destructive backend must itself never retry FORMAT_PICC internally.
  */
 class DesfireFormatUseCase {
     fun preflight(backend: CardBackend): CardResult<DesfireFormatPreflight> {
@@ -171,7 +178,7 @@ class DesfireFormatUseCase {
             return DesfireFormatResult(
                 status = DesfireFormatStatus.FORMAT_FAILED,
                 identity = null,
-                formatCommandSent = false,
+                destructiveOperationInvoked = false,
                 formatError = CardError.PROTOCOL_CONSTRAINT,
                 message = "DESFire FORMAT_PICC requires the PICC master key (key number 0)."
             )
@@ -182,7 +189,7 @@ class DesfireFormatUseCase {
             return DesfireFormatResult(
                 status = DesfireFormatStatus.FORMAT_FAILED,
                 identity = null,
-                formatCommandSent = false,
+                destructiveOperationInvoked = false,
                 formatError = connect.error,
                 message = connect.message ?: "Unable to connect for DESFire format."
             )
@@ -195,7 +202,7 @@ class DesfireFormatUseCase {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.FORMAT_FAILED,
                     identity = identity,
-                    formatCommandSent = false,
+                    destructiveOperationInvoked = false,
                     formatError = identityResult.error,
                     message = identityResult.message ?: "Unable to identify card before format."
                 )
@@ -205,33 +212,33 @@ class DesfireFormatUseCase {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.CARD_MISMATCH,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = false,
+                    destructiveOperationInvoked = false,
                     formatError = CardError.PROTOCOL_CONSTRAINT,
                     message = "Presented card does not match the DESFire card confirmed during preflight."
                 )
             }
 
-            // Positive protocol probe immediately before the destructive command. Do not trust
+            // Positive protocol probe immediately before the destructive operation. Do not trust
             // ISO-DEP presence / the backend wrapper alone as proof that this is a DESFire PICC.
             val versionProbe = backend.execute(DesfireGetVersion)
             if (!versionProbe.isSuccess || versionProbe.value !is CardResponse.DesfireVersion) {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.FORMAT_FAILED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = false,
+                    destructiveOperationInvoked = false,
                     formatError = if (versionProbe.isSuccess) CardError.PROTOCOL_CONSTRAINT else versionProbe.error,
-                    message = versionProbe.message ?: "DESFire GetVersion probe failed immediately before format; no format command was sent."
+                    message = versionProbe.message ?: "DESFire GetVersion probe failed immediately before format; no destructive operation was invoked."
                 )
             }
 
             // Consume only after the correct card and protocol have been positively re-verified,
-            // immediately before the destructive command. A format failure still consumes the
-            // authorization: a retry requires new preflight + confirmation.
+            // immediately before the destructive backend call. A backend failure still consumes
+            // the authorization: a retry requires new preflight + confirmation.
             if (!authorization.consume()) {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.AUTHORIZATION_CONSUMED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = false,
+                    destructiveOperationInvoked = false,
                     formatError = CardError.PROTOCOL_CONSTRAINT,
                     message = "This format authorization has already been used. Run a new preflight and confirm again."
                 )
@@ -242,9 +249,9 @@ class DesfireFormatUseCase {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.FORMAT_FAILED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = true,
+                    destructiveOperationInvoked = true,
                     formatError = format.error,
-                    message = format.message ?: "DESFire FORMAT_PICC failed. No automatic retry was attempted."
+                    message = format.message ?: "DESFire format operation failed after authorization. No automatic retry was attempted."
                 )
             }
 
@@ -261,7 +268,7 @@ class DesfireFormatUseCase {
                 applicationIds != null && applicationIds.isEmpty() -> DesfireFormatResult(
                     status = DesfireFormatStatus.SUCCESS_VERIFIED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = true,
+                    destructiveOperationInvoked = true,
                     remainingApplicationIds = emptyList(),
                     message = "FORMAT_PICC succeeded and the application directory is empty."
                 )
@@ -269,23 +276,23 @@ class DesfireFormatUseCase {
                 applicationIds != null -> DesfireFormatResult(
                     status = DesfireFormatStatus.VERIFICATION_FAILED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = true,
+                    destructiveOperationInvoked = true,
                     remainingApplicationIds = applicationIds.toList(),
-                    message = "FORMAT_PICC returned success, but applications are still visible. The command was not retried."
+                    message = "The format operation returned success, but applications are still visible. The operation was not retried."
                 )
 
                 versionVerification.isSuccess -> DesfireFormatResult(
                     status = DesfireFormatStatus.SUCCESS_UNVERIFIED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = true,
-                    message = "FORMAT_PICC returned success. Card communication recovered, but the application directory could not be verified."
+                    destructiveOperationInvoked = true,
+                    message = "The format operation returned success. Card communication recovered, but the application directory could not be verified."
                 )
 
                 else -> DesfireFormatResult(
                     status = DesfireFormatStatus.SUCCESS_UNVERIFIED,
                     identity = identity.copy(uid = identity.uid.copyOf()),
-                    formatCommandSent = true,
-                    message = "FORMAT_PICC returned success, but post-format verification was unavailable. Rescan the card before taking further action."
+                    destructiveOperationInvoked = true,
+                    message = "The format operation returned success, but post-format verification was unavailable. Rescan the card before taking further action."
                 )
             }
         } finally {
