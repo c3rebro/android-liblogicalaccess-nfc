@@ -36,6 +36,25 @@ class DesfireFormatUseCaseTest {
     }
 
     @Test
+    fun mutatingPublicIdentityUidCannotChangeAuthorizationTarget() {
+        val service = DesfireFormatUseCase()
+        val backend = FakeFormatBackend(uid = uid, initialApps = listOf(0x123456))
+        val preflight = requireNotNull(service.preflight(backend).value)
+        val originalPhrase = preflight.confirmationPhrase
+
+        preflight.identity.uid.fill(0x7F)
+
+        assertEquals("FORMAT 04010203", originalPhrase)
+        assertEquals(originalPhrase, preflight.confirmationPhrase)
+
+        val authorization = DesfireFormatAuthorization.confirm(preflight, originalPhrase)
+        val result = service.execute(backend, authorization, key)
+
+        assertEquals(DesfireFormatStatus.SUCCESS_VERIFIED, result.status)
+        assertEquals(1, backend.formatCalls)
+    }
+
+    @Test
     fun preflightRequiresPositiveDesfireVersionProbe() {
         val backend = FakeFormatBackend(uid = uid, failVersion = true)
 
