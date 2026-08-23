@@ -7,8 +7,8 @@ The Quick Check is intentionally implemented above the card backend: it is an or
 
 ## Current runtime flow
 
-1. Connect to one card session.
-2. Identify the card and require MIFARE DESFire.
+1. Android detects an ISO-DEP tag and opens one `IsoDep` session.
+2. The JNI bridge creates one liblogicalaccess DESFire session on the same callback thread.
 3. Read DESFire version information where available.
 4. Read free memory where available.
 5. Try application-directory listing without authentication.
@@ -16,10 +16,13 @@ The Quick Check is intentionally implemented above the card backend: it is an or
 7. For every discovered AID:
    - try application settings without authentication;
    - try file listing without authentication;
-   - only if listing is denied, try configured keys for that AID;
+   - when listing is protected, try configured keys for that AID;
    - AID-specific keys are tried before global application defaults;
-   - after successful authentication, read application settings, file IDs and file settings.
-8. Return a structured report. No card write/change operation is part of Quick Check.
+   - if file IDs are public but individual file settings are protected, retry those file settings with configured AID keys;
+   - report which metadata was public and which required authentication.
+8. Destroy the native session and close `IsoDep`.
+
+No write, create, delete, format, change-key or change-settings operation is exposed by the native Quick Check backend.
 
 ## Access states
 
@@ -27,11 +30,11 @@ The runtime distinguishes:
 
 - `PUBLIC`: information was available without authentication.
 - `AUTHENTICATED`: a configured key was required and accepted.
-- `KEY_REQUIRED`: the application exists, but the available key set does not permit listing.
-- `DENIED`: a key was accepted for the surrounding operation but a subordinate metadata read was still denied.
+- `KEY_REQUIRED`: the application/file exists, but no key is configured for the protected metadata.
+- `DENIED`: configured keys were tried but did not permit the metadata read; the AID remains eligible for adding another key.
 - `UNAVAILABLE`: metadata was not available for another reason.
 
-This is intentionally more explicit than the original RFIDGear tree UI because a successful `GetKeySettings` call does not necessarily prove that an attempted key authenticated; DESFire may permit public metadata reads.
+This is intentionally more explicit than the original RFIDGear tree UI because a successful metadata read does not necessarily prove that an attempted key authenticated; DESFire may permit public metadata reads.
 
 ## Key configuration
 
@@ -47,7 +50,7 @@ For application inspection the order is:
 public access
   -> AID-specific keys
   -> global application defaults
-  -> KEY_REQUIRED
+  -> KEY_REQUIRED / DENIED
 ```
 
 A key contains:
@@ -67,7 +70,7 @@ The key object's `toString()` never emits the secret bytes.
 
 ## Android key UI
 
-The app currently supports adding an application-specific Quick Check key by AID.
+The app supports adding an application-specific Quick Check key by AID.
 The UI accepts decimal or `0x`-prefixed AIDs and common key separators.
 
 Keys are currently **session-only**:
@@ -77,20 +80,20 @@ Keys are currently **session-only**:
 - key values are not displayed again after adding them;
 - clearing session keys overwrites the current in-memory key byte arrays before dropping the configuration.
 
-When native Quick Check execution is connected, the intended UI flow is:
+The active flow is:
 
 ```text
 scan card
-  -> report contains KEY_REQUIRED for AID 0x123456
-  -> prompt "Define key for AID 0x123456"
-  -> user enters key
-  -> ask user to present the card again
-  -> next Quick Check retries AID-specific key before global defaults
+  -> Quick Check reports KEY_REQUIRED or DENIED for AID 0x123456
+  -> app opens "Define key for AID 0x123456"
+  -> user enters key type, number and value
+  -> present card again
+  -> next Quick Check retries the AID-specific key before global defaults
 ```
 
 Persistent key storage, if added later, must be implemented separately with Android Keystore-backed encryption. Raw DESFire keys must not be persisted as plaintext preferences.
 
-## CardBackend primitives added for Quick Check
+## CardBackend primitives used by Quick Check
 
 - `DesfireGetVersion`
 - `DesfireGetFreeMemory`
@@ -100,25 +103,54 @@ Persistent key storage, if added later, must be implemented separately with Andr
 - `DesfireListFiles`
 - `DesfireReadFileSettings`
 
-Responses carry typed DESFire metadata and, where relevant, whether the backend knows that authentication succeeded.
+The generic `core-card` model also contains destructive commands for the future encoder, but `NativeDesfireCardBackend` deliberately does not map them. Passing one of those commands to the Quick Check backend returns `PROTOCOL_CONSTRAINT` before a native card operation is attempted.
 
-## Native work still required
+## Native implementation
 
-The current JNI bridge still only holds an `AndroidIsoDepTransport`; liblogicalaccess is not linked yet.
-The next implementation step is a native `CardBackend` implementation that maps the Quick Check primitives to liblogicalaccess 3.7.0:
+The native read-only path is implemented as:
 
 ```text
 Android IsoDep.transceive()
         |
-JNI DataTransport
+AndroidIsoDepDataTransport (C++ / JNI)
         |
 ISO7816ReaderCardAdapter
         |
-DESFireISO7816Commands / DESFireEV1ISO7816Commands
+DESFireISO7816ResultChecker
         |
-CardBackend responses
+DESFireEV1Chip + DESFireEV1ISO7816Commands
+        |
+NativeDesfireCardBackend
         |
 DesfireQuickCheckService
 ```
 
-All commands for one Quick Check must run inside one uninterrupted `IsoDep`/JNI/liblogicalaccess session and on the same JNI-owning thread.
+`AndroidIsoDepDataTransport` is pinned to the JNI thread on which it was created. A complete Quick Check therefore runs synchronously inside one `onTagDiscovered()` callback and one uninterrupted `IsoDep` session.
+
+The native bridge exposes only seven operation IDs for Quick Check: version, free memory, application listing, authenticate, application settings, file listing and file settings.
+
+## Native dependency build
+
+The Windows bootstrap prepares liblogicalaccess `3.7.0` for `arm64-v8a` with Conan and the Android NDK before Gradle/CMake builds the APK. Generated native dependencies are staged under `.tools/`, which is git-ignored.
+
+`build-and-deploy.bat` remains the intended entry point for the complete Windows build/test/install flow.
+
+## Verification status
+
+Implemented and covered by JVM/Fake-Backend tests:
+
+- public application/file listing;
+- AID-specific key fallback;
+- AID keys before global defaults;
+- protected file metadata even when file IDs are public;
+- PICC directory key fallback;
+- key-length validation;
+- `needsKeys` reporting for missing or unsuccessful AID keys.
+
+Implemented but still requiring the first real Windows/native build and physical-card verification:
+
+- Conan cross-build of liblogicalaccess and dependencies with the pinned NDK;
+- CMake link of the JNI bridge against the generated Conan package;
+- packaging/loading all required Android `.so` dependencies;
+- actual DESFire APDU exchange through `IsoDep.transceive()`;
+- exception/status mapping against real cards and Android `TagLostException` behavior.
