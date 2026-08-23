@@ -33,7 +33,7 @@ class DesfireFormatAuthorization private constructor(
 ) {
     companion object {
         fun confirm(preflight: DesfireFormatPreflight, typedPhrase: String): DesfireFormatAuthorization {
-            require(typedPhrase.trim() == preflight.confirmationPhrase) {
+            require(typedPhrase == preflight.confirmationPhrase) {
                 "Confirmation must exactly match '${preflight.confirmationPhrase}'."
             }
             return DesfireFormatAuthorization(preflight.identity.uid.copyOf())
@@ -57,9 +57,15 @@ data class DesfireFormatResult(
     val message: String? = null,
     val remainingApplicationIds: List<Int>? = null
 ) {
-    val succeeded: Boolean
+    /** True only when the destructive operation was positively verified afterwards. */
+    val verifiedSuccess: Boolean
+        get() = status == DesfireFormatStatus.SUCCESS_VERIFIED
+
+    /** The card/backend reported FORMAT_PICC success, even if verification was unavailable/failed. */
+    val commandReportedSuccess: Boolean
         get() = status == DesfireFormatStatus.SUCCESS_VERIFIED ||
-            status == DesfireFormatStatus.SUCCESS_UNVERIFIED
+            status == DesfireFormatStatus.SUCCESS_UNVERIFIED ||
+            status == DesfireFormatStatus.VERIFICATION_FAILED
 }
 
 /**
