@@ -29,6 +29,19 @@ import de.shansen.rfcard.CardCommand
 class NativeDesfireCardBackend(
     private val uid: ByteArray
 ) : CardBackend {
+    companion object {
+        fun supports(command: CardCommand): Boolean = when (command) {
+            DesfireGetVersion,
+            DesfireGetFreeMemory,
+            is DesfireListApplications,
+            is DesfireAuthenticate,
+            is DesfireReadApplicationSettings,
+            is DesfireListFiles,
+            is DesfireReadFileSettings -> true
+
+            else -> false
+        }
+    }
 
     private var sessionHandle: Long = 0L
 

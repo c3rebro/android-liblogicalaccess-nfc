@@ -19,77 +19,122 @@ import de.shansen.rfcard.DesfireReadData
 import de.shansen.rfcard.DesfireReadFileSettings
 import de.shansen.rfcard.DesfireWriteData
 
-enum class RfidGearActionReadiness(val previewStatus: String) {
-    QUICK_CHECK_ENABLED("ENABLED"),
-    QUICK_CHECK_NOT_MAPPED("NOT_MAPPED"),
-    MUTATING_DISABLED("WRITE_DISABLED"),
-    DESTRUCTIVE_DISABLED("DESTRUCTIVE_DISABLED"),
-    UNSUPPORTED("UNSUPPORTED")
+enum class RfidGearActionSafetyKind {
+    READ_ONLY,
+    MUTATING,
+    DESTRUCTIVE,
+    UNSUPPORTED
+}
+
+enum class RfidGearBackendReadiness {
+    SUPPORTED,
+    NOT_SUPPORTED
 }
 
 data class RfidGearActionSafety(
-    val readiness: RfidGearActionReadiness,
+    val kind: RfidGearActionSafetyKind,
     val operationLabel: String,
     val reason: String
 ) {
-    val canRunOnCurrentAndroidBackend: Boolean
-        get() = readiness == RfidGearActionReadiness.QUICK_CHECK_ENABLED
+    val safeToRun: Boolean
+        get() = kind == RfidGearActionSafetyKind.READ_ONLY
+}
 
-    fun previewLine(): String =
-        "${readiness.previewStatus} $operationLabel - $reason"
+data class RfidGearActionEvaluation(
+    val safety: RfidGearActionSafety,
+    val backendReadiness: RfidGearBackendReadiness
+) {
+    val canRunOnCurrentAndroidBackend: Boolean
+        get() = safety.safeToRun && backendReadiness == RfidGearBackendReadiness.SUPPORTED
+
+    val previewStatus: String
+        get() = when (safety.kind) {
+            RfidGearActionSafetyKind.READ_ONLY -> when (backendReadiness) {
+                RfidGearBackendReadiness.SUPPORTED -> "ENABLED"
+                RfidGearBackendReadiness.NOT_SUPPORTED -> "NOT_MAPPED"
+            }
+            RfidGearActionSafetyKind.MUTATING -> "WRITE_DISABLED"
+            RfidGearActionSafetyKind.DESTRUCTIVE -> "DESTRUCTIVE_DISABLED"
+            RfidGearActionSafetyKind.UNSUPPORTED -> "UNSUPPORTED"
+        }
+
+    fun previewLine(): String = buildString {
+        append(previewStatus)
+        append(' ')
+        append(safety.operationLabel)
+        append(" - ")
+        append(safety.reason)
+        if (safety.safeToRun && backendReadiness == RfidGearBackendReadiness.NOT_SUPPORTED) {
+            append("; not mapped by the current Android backend")
+        }
+    }
 }
 
 /**
- * Single policy boundary between RFIDGear project compilation and Android card execution.
+ * Safety classifier for RFIDGear project actions.
  *
- * The compiler may understand future encoder operations before the Android backend is allowed
- * to execute them. This policy keeps the preview and future execution gate aligned.
+ * Safety and backend readiness are deliberately separate: a command may be read-only but not
+ * supported by the current Android backend yet, and a future backend capability must not make
+ * mutating commands executable without an explicit safety decision.
  */
 object RfidGearActionSafetyPolicy {
-    fun evaluate(action: RfidGearAction): RfidGearActionSafety = when (action) {
+    fun classify(action: RfidGearAction): RfidGearActionSafety = when (action) {
         is RfidGearAction.CheckApplicationExists -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.QUICK_CHECK_ENABLED,
+            kind = RfidGearActionSafetyKind.READ_ONLY,
             operationLabel = "AppExistCheck",
-            reason = "read-only application directory check"
+            reason = "read-only composite check; requires RFIDGear result evaluation"
         )
 
         is RfidGearAction.CheckApplicationKeyCount -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.QUICK_CHECK_ENABLED,
+            kind = RfidGearActionSafetyKind.READ_ONLY,
             operationLabel = "CheckAppKeyCount",
-            reason = "read-only application settings check"
+            reason = "read-only composite check; requires RFIDGear result evaluation"
         )
 
-        is RfidGearAction.Execute -> evaluateCommand(action.command)
+        is RfidGearAction.Execute -> classifyCommand(action.command)
 
         is RfidGearAction.Unsupported -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.UNSUPPORTED,
+            kind = RfidGearActionSafetyKind.UNSUPPORTED,
             operationLabel = "Unsupported",
             reason = action.reason
         )
     }
 
-    private fun evaluateCommand(command: CardCommand): RfidGearActionSafety = when (command) {
+    fun evaluate(
+        action: RfidGearAction,
+        backendSupportsAction: (RfidGearAction) -> Boolean
+    ): RfidGearActionEvaluation {
+        val safety = classify(action)
+        val readiness = if (safety.safeToRun && backendSupportsAction(action)) {
+            RfidGearBackendReadiness.SUPPORTED
+        } else {
+            RfidGearBackendReadiness.NOT_SUPPORTED
+        }
+        return RfidGearActionEvaluation(safety, readiness)
+    }
+
+    private fun classifyCommand(command: CardCommand): RfidGearActionSafety = when (command) {
         DesfireGetVersion,
         DesfireGetFreeMemory,
         is DesfireListApplications,
         is DesfireReadApplicationSettings,
         is DesfireListFiles,
         is DesfireReadFileSettings -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.QUICK_CHECK_ENABLED,
+            kind = RfidGearActionSafetyKind.READ_ONLY,
             operationLabel = command.javaClass.simpleName,
-            reason = "mapped by the current native Quick Check backend"
+            reason = "read-only card metadata command"
         )
 
         is DesfireAuthenticate -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.QUICK_CHECK_ENABLED,
+            kind = RfidGearActionSafetyKind.READ_ONLY,
             operationLabel = command.javaClass.simpleName,
             reason = "session authentication only; card data is not changed"
         )
 
         is DesfireReadData -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.QUICK_CHECK_NOT_MAPPED,
+            kind = RfidGearActionSafetyKind.READ_ONLY,
             operationLabel = command.javaClass.simpleName,
-            reason = "read-only, but native file-data reading is not implemented yet"
+            reason = "read-only file-data command"
         )
 
         is DesfireCreateApplication,
@@ -98,7 +143,7 @@ object RfidGearActionSafetyPolicy {
         is DesfireChangeKey,
         is DesfireChangeKeySettings,
         is DesfireWriteData -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.MUTATING_DISABLED,
+            kind = RfidGearActionSafetyKind.MUTATING,
             operationLabel = command.javaClass.simpleName,
             reason = "would modify card data; encoder execution is not enabled yet"
         )
@@ -106,7 +151,7 @@ object RfidGearActionSafetyPolicy {
         is DesfireDeleteApplication,
         is DesfireDeleteFile,
         is DesfireFormatCard -> RfidGearActionSafety(
-            readiness = RfidGearActionReadiness.DESTRUCTIVE_DISABLED,
+            kind = RfidGearActionSafetyKind.DESTRUCTIVE,
             operationLabel = command.javaClass.simpleName,
             reason = "would delete or format card data; blocked on Android"
         )

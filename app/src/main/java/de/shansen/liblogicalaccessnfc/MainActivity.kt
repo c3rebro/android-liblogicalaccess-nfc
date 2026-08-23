@@ -19,6 +19,7 @@ import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
 import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
 import de.shansen.rfidgearruntime.DesfireQuickCheckReport
 import de.shansen.rfidgearruntime.DesfireQuickCheckService
+import de.shansen.rfidgearruntime.RfidGearAction
 import de.shansen.rfidgearruntime.RfidGearActionSafetyPolicy
 import de.shansen.rfidgearruntime.RfidGearTaskCompiler
 import de.shansen.rfproject.RfExecutionPlanCompiler
@@ -190,7 +191,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                         val compileStatus = runCatching { RfidGearTaskCompiler.compile(projectTask) }
                             .fold(
                                 onSuccess = { compiled ->
-                                    RfidGearActionSafetyPolicy.evaluate(compiled.action).previewLine()
+                                    RfidGearActionSafetyPolicy.evaluate(
+                                        compiled.action,
+                                        ::currentAndroidBackendSupports
+                                    ).previewLine()
                                 },
                                 onFailure = { error -> "INVALID ${error.message ?: error.javaClass.simpleName}" }
                             )
@@ -232,6 +236,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 }
             }
         }.start()
+    }
+
+    private fun currentAndroidBackendSupports(action: RfidGearAction): Boolean = when (action) {
+        is RfidGearAction.Execute -> NativeDesfireCardBackend.supports(action.command)
+        else -> false
     }
 
     private fun getDisplayName(uri: Uri): String? {

@@ -10,6 +10,7 @@ import de.shansen.rfcard.DesfireFileType
 import de.shansen.rfcard.DesfireFormatCard
 import de.shansen.rfcard.DesfireKey
 import de.shansen.rfcard.DesfireKeyType
+import de.shansen.rfcard.DesfireListApplications
 import de.shansen.rfcard.DesfireReadApplicationSettings
 import de.shansen.rfcard.DesfireReadData
 import de.shansen.rfcard.DesfireWriteData
@@ -22,34 +23,39 @@ class RfidGearActionSafetyPolicyTest {
     private val aesKey = DesfireKey(ByteArray(16), DesfireKeyType.AES, 0)
 
     @Test
-    fun readOnlyApplicationSettingsAreEnabledForCurrentBackend() {
-        val safety = RfidGearActionSafetyPolicy.evaluate(
+    fun readOnlyApplicationSettingsAreSafeAndCanBeEnabledByBackend() {
+        val evaluation = RfidGearActionSafetyPolicy.evaluate(
             RfidGearAction.Execute(
                 DesfireReadApplicationSettings(
                     appId = 0x123456,
                     key = aesKey,
                     authenticateBeforeRead = true
                 )
-            )
+            ),
+            backendSupportsAction = { true }
         )
 
-        assertEquals(RfidGearActionReadiness.QUICK_CHECK_ENABLED, safety.readiness)
-        assertTrue(safety.canRunOnCurrentAndroidBackend)
+        assertEquals(RfidGearActionSafetyKind.READ_ONLY, evaluation.safety.kind)
+        assertEquals(RfidGearBackendReadiness.SUPPORTED, evaluation.backendReadiness)
+        assertTrue(evaluation.canRunOnCurrentAndroidBackend)
+        assertEquals("ENABLED", evaluation.previewStatus)
     }
 
     @Test
-    fun sessionAuthenticationIsEnabledButDocumentedAsNonPersistent() {
-        val safety = RfidGearActionSafetyPolicy.evaluate(
-            RfidGearAction.Execute(DesfireAuthenticate(0x123456, aesKey))
+    fun sessionAuthenticationIsSafeButDocumentedAsSessionOnly() {
+        val evaluation = RfidGearActionSafetyPolicy.evaluate(
+            RfidGearAction.Execute(DesfireAuthenticate(0x123456, aesKey)),
+            backendSupportsAction = { true }
         )
 
-        assertEquals(RfidGearActionReadiness.QUICK_CHECK_ENABLED, safety.readiness)
-        assertTrue(safety.reason.contains("session authentication"))
+        assertEquals(RfidGearActionSafetyKind.READ_ONLY, evaluation.safety.kind)
+        assertTrue(evaluation.safety.reason.contains("session authentication"))
+        assertTrue(evaluation.canRunOnCurrentAndroidBackend)
     }
 
     @Test
-    fun readDataIsSafeButNotMappedYet() {
-        val safety = RfidGearActionSafetyPolicy.evaluate(
+    fun readDataIsSafeButCanRemainNotMapped() {
+        val evaluation = RfidGearActionSafetyPolicy.evaluate(
             RfidGearAction.Execute(
                 DesfireReadData(
                     appId = 0x123456,
@@ -58,15 +64,49 @@ class RfidGearActionSafetyPolicyTest {
                     readKey = aesKey,
                     communicationMode = DesfireCommunicationMode.PLAIN
                 )
-            )
+            ),
+            backendSupportsAction = { false }
         )
 
-        assertEquals(RfidGearActionReadiness.QUICK_CHECK_NOT_MAPPED, safety.readiness)
-        assertFalse(safety.canRunOnCurrentAndroidBackend)
+        assertEquals(RfidGearActionSafetyKind.READ_ONLY, evaluation.safety.kind)
+        assertEquals(RfidGearBackendReadiness.NOT_SUPPORTED, evaluation.backendReadiness)
+        assertFalse(evaluation.canRunOnCurrentAndroidBackend)
+        assertEquals("NOT_MAPPED", evaluation.previewStatus)
     }
 
     @Test
-    fun cardWritesAreDisabled() {
+    fun compositeChecksAreReadOnlyButNotMappedWithoutSemanticExecutor() {
+        val exists = RfidGearActionSafetyPolicy.evaluate(
+            RfidGearAction.CheckApplicationExists(
+                command = DesfireListApplications(piccMasterKey = aesKey),
+                targetAppId = 0x123456
+            ),
+            backendSupportsAction = { false }
+        )
+        val keyCount = RfidGearActionSafetyPolicy.evaluate(
+            RfidGearAction.CheckApplicationKeyCount(
+                command = DesfireReadApplicationSettings(
+                    appId = 0x123456,
+                    key = aesKey,
+                    authenticateBeforeRead = true
+                ),
+                expectedCount = 5
+            ),
+            backendSupportsAction = { false }
+        )
+
+        assertEquals(RfidGearActionSafetyKind.READ_ONLY, exists.safety.kind)
+        assertEquals(RfidGearActionSafetyKind.READ_ONLY, keyCount.safety.kind)
+        assertEquals(RfidGearBackendReadiness.NOT_SUPPORTED, exists.backendReadiness)
+        assertEquals(RfidGearBackendReadiness.NOT_SUPPORTED, keyCount.backendReadiness)
+        assertFalse(exists.canRunOnCurrentAndroidBackend)
+        assertFalse(keyCount.canRunOnCurrentAndroidBackend)
+        assertEquals("NOT_MAPPED", exists.previewStatus)
+        assertEquals("NOT_MAPPED", keyCount.previewStatus)
+    }
+
+    @Test
+    fun cardWritesAreDisabledEvenIfABackendWouldSupportTheCommand() {
         val createApplication = RfidGearActionSafetyPolicy.evaluate(
             RfidGearAction.Execute(
                 DesfireCreateApplication(
@@ -76,7 +116,8 @@ class RfidGearActionSafetyPolicyTest {
                     maxKeys = 5,
                     keySettings = 0x0F
                 )
-            )
+            ),
+            backendSupportsAction = { true }
         )
         val writeData = RfidGearActionSafetyPolicy.evaluate(
             RfidGearAction.Execute(
@@ -87,7 +128,8 @@ class RfidGearActionSafetyPolicyTest {
                     writeKey = aesKey,
                     communicationMode = DesfireCommunicationMode.PLAIN
                 )
-            )
+            ),
+            backendSupportsAction = { true }
         )
         val createFile = RfidGearActionSafetyPolicy.evaluate(
             RfidGearAction.Execute(
@@ -100,12 +142,14 @@ class RfidGearActionSafetyPolicyTest {
                     communicationMode = DesfireCommunicationMode.PLAIN,
                     accessRights = DesfireAccessRights(0, 0, 0, 0)
                 )
-            )
+            ),
+            backendSupportsAction = { true }
         )
 
-        assertEquals(RfidGearActionReadiness.MUTATING_DISABLED, createApplication.readiness)
-        assertEquals(RfidGearActionReadiness.MUTATING_DISABLED, writeData.readiness)
-        assertEquals(RfidGearActionReadiness.MUTATING_DISABLED, createFile.readiness)
+        assertEquals(RfidGearActionSafetyKind.MUTATING, createApplication.safety.kind)
+        assertEquals(RfidGearActionSafetyKind.MUTATING, writeData.safety.kind)
+        assertEquals(RfidGearActionSafetyKind.MUTATING, createFile.safety.kind)
+        assertEquals("WRITE_DISABLED", createApplication.previewStatus)
         assertFalse(createApplication.canRunOnCurrentAndroidBackend)
         assertFalse(writeData.canRunOnCurrentAndroidBackend)
         assertFalse(createFile.canRunOnCurrentAndroidBackend)
@@ -114,23 +158,28 @@ class RfidGearActionSafetyPolicyTest {
     @Test
     fun destructiveOperationsAreDisabledSeparately() {
         val deleteApplication = RfidGearActionSafetyPolicy.evaluate(
-            RfidGearAction.Execute(DesfireDeleteApplication(0x123456, aesKey))
+            RfidGearAction.Execute(DesfireDeleteApplication(0x123456, aesKey)),
+            backendSupportsAction = { true }
         )
         val formatCard = RfidGearActionSafetyPolicy.evaluate(
-            RfidGearAction.Execute(DesfireFormatCard(aesKey))
+            RfidGearAction.Execute(DesfireFormatCard(aesKey)),
+            backendSupportsAction = { true }
         )
 
-        assertEquals(RfidGearActionReadiness.DESTRUCTIVE_DISABLED, deleteApplication.readiness)
-        assertEquals(RfidGearActionReadiness.DESTRUCTIVE_DISABLED, formatCard.readiness)
+        assertEquals(RfidGearActionSafetyKind.DESTRUCTIVE, deleteApplication.safety.kind)
+        assertEquals(RfidGearActionSafetyKind.DESTRUCTIVE, formatCard.safety.kind)
+        assertEquals("DESTRUCTIVE_DISABLED", deleteApplication.previewStatus)
     }
 
     @Test
     fun unsupportedCompilerActionsStayUnsupported() {
-        val safety = RfidGearActionSafetyPolicy.evaluate(
-            RfidGearAction.Unsupported("payload tree is not mapped")
+        val evaluation = RfidGearActionSafetyPolicy.evaluate(
+            RfidGearAction.Unsupported("payload tree is not mapped"),
+            backendSupportsAction = { true }
         )
 
-        assertEquals(RfidGearActionReadiness.UNSUPPORTED, safety.readiness)
-        assertEquals("payload tree is not mapped", safety.reason)
+        assertEquals(RfidGearActionSafetyKind.UNSUPPORTED, evaluation.safety.kind)
+        assertEquals("payload tree is not mapped", evaluation.safety.reason)
+        assertFalse(evaluation.canRunOnCurrentAndroidBackend)
     }
 }
