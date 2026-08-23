@@ -25,12 +25,26 @@ data class DesfireFormatPreflight(
 }
 
 /**
- * Opaque proof that the user confirmed the exact card UID from a preflight scan.
+ * Opaque one-shot proof that the user confirmed the exact card UID from a preflight scan.
  * Callers cannot construct this directly; use [confirm].
  */
 class DesfireFormatAuthorization private constructor(
-    internal val expectedUid: ByteArray
+    private val expectedUid: ByteArray
 ) {
+    private var consumed = false
+
+    internal fun matches(uid: ByteArray): Boolean = expectedUid.contentEquals(uid)
+
+    /** Returns false when this authorization has already been consumed. */
+    internal fun consume(): Boolean = synchronized(this) {
+        if (consumed) {
+            false
+        } else {
+            consumed = true
+            true
+        }
+    }
+
     companion object {
         fun confirm(preflight: DesfireFormatPreflight, typedPhrase: String): DesfireFormatAuthorization {
             require(typedPhrase == preflight.confirmationPhrase) {
@@ -46,7 +60,8 @@ enum class DesfireFormatStatus {
     SUCCESS_UNVERIFIED,
     FORMAT_FAILED,
     VERIFICATION_FAILED,
-    CARD_MISMATCH
+    CARD_MISMATCH,
+    AUTHORIZATION_CONSUMED
 }
 
 data class DesfireFormatResult(
@@ -75,7 +90,7 @@ data class DesfireFormatResult(
  * - preflight is read-only;
  * - execution requires an authorization created from the preflight confirmation phrase;
  * - the card UID is checked again before FORMAT_PICC is sent;
- * - FORMAT_PICC is sent at most once per execute() call;
+ * - an authorization can authorize only one FORMAT_PICC attempt;
  * - transport/auth failures never trigger an automatic destructive retry.
  */
 class DesfireFormatUseCase {
@@ -161,15 +176,25 @@ class DesfireFormatUseCase {
                 )
             }
 
-            if (identity.technology != CardTechnology.MIFARE_DESFIRE ||
-                !identity.uid.contentEquals(authorization.expectedUid)
-            ) {
+            if (identity.technology != CardTechnology.MIFARE_DESFIRE || !authorization.matches(identity.uid)) {
                 return DesfireFormatResult(
                     status = DesfireFormatStatus.CARD_MISMATCH,
                     identity = identity.copy(uid = identity.uid.copyOf()),
                     formatCommandSent = false,
                     formatError = CardError.PROTOCOL_CONSTRAINT,
                     message = "Presented card does not match the DESFire card confirmed during preflight."
+                )
+            }
+
+            // Consume only after the correct card is present, immediately before the destructive command.
+            // A transport/auth failure still consumes the authorization: a retry requires new preflight + confirmation.
+            if (!authorization.consume()) {
+                return DesfireFormatResult(
+                    status = DesfireFormatStatus.AUTHORIZATION_CONSUMED,
+                    identity = identity.copy(uid = identity.uid.copyOf()),
+                    formatCommandSent = false,
+                    formatError = CardError.PROTOCOL_CONSTRAINT,
+                    message = "This format authorization has already been used. Run a new preflight and confirm again."
                 )
             }
 
