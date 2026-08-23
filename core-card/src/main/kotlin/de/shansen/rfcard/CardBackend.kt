@@ -28,7 +28,7 @@ enum class CardTechnology {
     MIFARE_DESFIRE
 }
 
-data class CardResult<T>(
+data class CardResult<out T>(
     val error: CardError,
     val value: T? = null,
     val message: String? = null
