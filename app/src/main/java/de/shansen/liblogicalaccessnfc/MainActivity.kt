@@ -20,6 +20,7 @@ import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
 import de.shansen.rfidgearruntime.DesfireQuickCheckReport
 import de.shansen.rfidgearruntime.DesfireQuickCheckService
 import de.shansen.rfidgearruntime.RfidGearAction
+import de.shansen.rfidgearruntime.RfidGearActionSafetyPolicy
 import de.shansen.rfidgearruntime.RfidGearTaskCompiler
 import de.shansen.rfproject.RfExecutionPlanCompiler
 import de.shansen.rfproject.RfProjectReader
@@ -190,12 +191,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                         val compileStatus = runCatching { RfidGearTaskCompiler.compile(projectTask) }
                             .fold(
                                 onSuccess = { compiled ->
-                                    when (val action = compiled.action) {
-                                        is RfidGearAction.Execute -> "SUPPORTED ${action.command.javaClass.simpleName}"
-                                        is RfidGearAction.CheckApplicationExists -> "SUPPORTED AppExistCheck"
-                                        is RfidGearAction.CheckApplicationKeyCount -> "SUPPORTED CheckAppKeyCount"
-                                        is RfidGearAction.Unsupported -> "UNSUPPORTED ${action.reason}"
-                                    }
+                                    RfidGearActionSafetyPolicy.evaluate(
+                                        compiled.action,
+                                        ::currentAndroidBackendSupports
+                                    ).previewLine()
                                 },
                                 onFailure = { error -> "INVALID ${error.message ?: error.javaClass.simpleName}" }
                             )
@@ -237,6 +236,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 }
             }
         }.start()
+    }
+
+    private fun currentAndroidBackendSupports(action: RfidGearAction): Boolean = when (action) {
+        is RfidGearAction.Execute -> NativeDesfireCardBackend.supports(action.command)
+        else -> false
     }
 
     private fun getDisplayName(uri: Uri): String? {
