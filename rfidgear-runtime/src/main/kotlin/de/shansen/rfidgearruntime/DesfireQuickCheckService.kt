@@ -47,6 +47,8 @@ class DesfireQuickCheckService {
 
             val directory = readApplicationDirectory(backend, config.piccKeys)
             if (directory.aids == null) {
+                val reportWarnings = warnings.toMutableList()
+                directory.message?.takeIf { it.isNotBlank() }?.let(reportWarnings::add)
                 return DesfireQuickCheckReport(
                     identity = identity,
                     version = version,
@@ -54,7 +56,7 @@ class DesfireQuickCheckService {
                     directoryAccess = directory.access,
                     directoryAuthenticatedWith = directory.key,
                     applications = emptyList(),
-                    warnings = warnings + directory.message.orEmpty().takeIf { it.isNotBlank() }.orEmpty(),
+                    warnings = reportWarnings,
                     error = directory.error,
                     errorMessage = directory.message
                 )
@@ -83,6 +85,7 @@ class DesfireQuickCheckService {
     /**
      * Re-inspects a single known application with a caller supplied key set.
      * Useful for the UI flow "application exists -> listing denied -> define key -> retry".
+     * The caller must keep the backend/card session connected for the whole call.
      */
     fun inspectApplication(
         backend: CardBackend,
@@ -117,8 +120,7 @@ class DesfireQuickCheckService {
                 settingsAccess = if (publicSettingsValue != null) DesfireQuickCheckAccess.PUBLIC else DesfireQuickCheckAccess.UNAVAILABLE,
                 fileIds = publicFileIds.fileIds,
                 filesAccess = DesfireQuickCheckAccess.PUBLIC,
-                key = null,
-                candidateKeys = keys
+                selectedKey = null
             )
         }
 
@@ -152,19 +154,19 @@ class DesfireQuickCheckService {
             )
             val fileIds = listWithKey.responseAs<CardResponse.DesfireFileIds>()
             if (fileIds != null) {
+                val authenticatedSettings = settingsWithKey.responseAs<CardResponse.DesfireApplicationSettings>()
                 return buildApplicationResult(
                     backend = backend,
                     aid = aid,
-                    settings = settingsWithKey.responseAs<CardResponse.DesfireApplicationSettings>() ?: publicSettingsValue,
+                    settings = authenticatedSettings ?: publicSettingsValue,
                     settingsAccess = when {
-                        settingsWithKey.responseAs<CardResponse.DesfireApplicationSettings>()?.wasAuthenticated == true -> DesfireQuickCheckAccess.AUTHENTICATED
+                        authenticatedSettings?.wasAuthenticated == true -> DesfireQuickCheckAccess.AUTHENTICATED
                         publicSettingsValue != null -> DesfireQuickCheckAccess.PUBLIC
                         else -> DesfireQuickCheckAccess.UNAVAILABLE
                     },
                     fileIds = fileIds.fileIds,
                     filesAccess = DesfireQuickCheckAccess.AUTHENTICATED,
-                    key = candidate.ref(),
-                    candidateKeys = keys,
+                    selectedKey = candidate,
                     attemptedKeys = attempted
                 )
             }
@@ -197,12 +199,9 @@ class DesfireQuickCheckService {
         settingsAccess: DesfireQuickCheckAccess,
         fileIds: List<Int>,
         filesAccess: DesfireQuickCheckAccess,
-        key: DesfireQuickCheckKeyRef?,
-        candidateKeys: List<DesfireQuickCheckKey>,
+        selectedKey: DesfireQuickCheckKey?,
         attemptedKeys: List<DesfireQuickCheckKeyRef> = emptyList()
     ): DesfireApplicationQuickCheck {
-        val selectedKey = key?.let { ref -> candidateKeys.firstOrNull { it.ref() == ref } }
-
         val files = fileIds.distinct().sorted().map { fileNo ->
             val result = backend.execute(
                 DesfireReadFileSettings(
@@ -238,7 +237,7 @@ class DesfireQuickCheckService {
             settings = settings?.toSnapshot(),
             settingsAccess = settingsAccess,
             filesAccess = filesAccess,
-            authenticatedWith = key,
+            authenticatedWith = selectedKey?.ref(),
             files = files,
             attemptedKeys = attemptedKeys
         )
@@ -405,15 +404,14 @@ private fun CardResponse.DesfireApplicationSettings.toSnapshot() =
     DesfireApplicationSettingsSnapshot(keySettings, maxKeys, keyType)
 
 private fun List<DesfireQuickCheckKey>.distinctBySecret(): List<DesfireQuickCheckKey> {
-    val seen = mutableSetOf<String>()
-    return filter { candidate ->
-        val fingerprint = buildString {
-            append(candidate.key.type.name)
-            append(':')
-            append(candidate.key.number)
-            append(':')
-            candidate.key.bytes.forEach { append("%02X".format(it)) }
+    val result = mutableListOf<DesfireQuickCheckKey>()
+    for (candidate in this) {
+        val duplicate = result.any { existing ->
+            existing.key.type == candidate.key.type &&
+                existing.key.number == candidate.key.number &&
+                existing.key.bytes.contentEquals(candidate.key.bytes)
         }
-        seen.add(fingerprint)
+        if (!duplicate) result += candidate
     }
+    return result
 }
