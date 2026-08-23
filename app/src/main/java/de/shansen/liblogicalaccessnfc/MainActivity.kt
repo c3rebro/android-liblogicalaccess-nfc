@@ -6,9 +6,15 @@ import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.widget.ArrayAdapter
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
+import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
+import de.shansen.rfcard.DesfireKeyType
+import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
+import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
 import de.shansen.rfidgearruntime.RfidGearAction
 import de.shansen.rfidgearruntime.RfidGearTaskCompiler
 import de.shansen.rfproject.RfExecutionPlanCompiler
@@ -21,6 +27,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var binding: ActivityMainBinding
     private var adapter: NfcAdapter? = null
     private val projectReader = RfProjectReader()
+    private var quickCheckConfig = DesfireQuickCheckConfig()
 
     private val openProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadProject(uri)
@@ -34,6 +41,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         binding.openProject.setOnClickListener {
             openProject.launch(arrayOf("*/*"))
         }
+        binding.addQuickCheckKey.setOnClickListener {
+            showAddQuickCheckKeyDialog()
+        }
+        binding.clearQuickCheckKeys.setOnClickListener {
+            clearSessionQuickCheckKeys()
+        }
+        updateQuickCheckKeySummary()
 
         adapter = NfcAdapter.getDefaultAdapter(this)
         binding.status.text = when {
@@ -62,6 +76,88 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     override fun onPause() {
         adapter?.disableReaderMode(this)
         super.onPause()
+    }
+
+    private fun showAddQuickCheckKeyDialog(prefillAid: Int? = null) {
+        val dialogBinding = DialogDesfireQuickCheckKeyBinding.inflate(layoutInflater)
+        val keyTypes = listOf(
+            DesfireKeyType.AES,
+            DesfireKeyType.TDES_3K,
+            DesfireKeyType.DES
+        )
+        dialogBinding.keyType.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            keyTypes.map(::keyTypeLabel)
+        )
+        prefillAid?.let { dialogBinding.aid.setText("0x%06X".format(it)) }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("DESFire application key")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Add", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val result = runCatching {
+                    val aid = DesfireQuickCheckKeyFactory.parseAid(dialogBinding.aid.text.toString())
+                    val keyNo = dialogBinding.keyNumber.text.toString().trim().toIntOrNull()
+                        ?: throw IllegalArgumentException("Key number must be a decimal number between 0 and 15.")
+                    val type = keyTypes[dialogBinding.keyType.selectedItemPosition]
+                    val key = DesfireQuickCheckKeyFactory.fromHex(
+                        label = dialogBinding.label.text.toString(),
+                        keyHex = dialogBinding.keyHex.text.toString(),
+                        type = type,
+                        keyNumber = keyNo
+                    )
+                    aid to key
+                }
+
+                result.onSuccess { (aid, key) ->
+                    quickCheckConfig = quickCheckConfig.withApplicationKey(aid, key)
+                    updateQuickCheckKeySummary()
+                    dialogBinding.keyHex.text?.clear()
+                    dialog.dismiss()
+                }.onFailure { error ->
+                    dialogBinding.keyHex.error = error.message ?: "Invalid DESFire key."
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun clearSessionQuickCheckKeys() {
+        quickCheckConfig.applicationKeys.values.flatten().forEach { it.key.clear() }
+        quickCheckConfig.defaultApplicationKeys.forEach { it.key.clear() }
+        quickCheckConfig.piccKeys.forEach { it.key.clear() }
+        quickCheckConfig = DesfireQuickCheckConfig()
+        updateQuickCheckKeySummary()
+    }
+
+    private fun updateQuickCheckKeySummary() {
+        if (quickCheckConfig.applicationKeys.isEmpty()) {
+            binding.quickCheckKeySummary.text =
+                "No application-specific quick-check keys configured.\nKeys are session-only."
+            return
+        }
+
+        binding.quickCheckKeySummary.text = buildString {
+            appendLine("Quick-check application keys (session-only):")
+            quickCheckConfig.applicationKeys.toSortedMap().forEach { (aid, keys) ->
+                appendLine("AID 0x%06X".format(aid))
+                keys.forEach { key ->
+                    appendLine("  - ${key.ref().label} [${keyTypeLabel(key.key.type)} key #${key.key.number}]")
+                }
+            }
+        }.trimEnd()
+    }
+
+    private fun keyTypeLabel(type: DesfireKeyType): String = when (type) {
+        DesfireKeyType.AES -> "AES"
+        DesfireKeyType.TDES_3K -> "3K3DES"
+        DesfireKeyType.DES -> "DES / 2K3DES"
     }
 
     private fun loadProject(uri: Uri) {
