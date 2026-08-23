@@ -65,11 +65,54 @@ enum class CardError(val rfidGearName: String) {
 sealed interface CardResponse {
     data object Empty : CardResponse
     data class Bytes(val data: ByteArray) : CardResponse
-    data class ApplicationIds(val aids: List<Int>) : CardResponse
+
+    data class ApplicationIds(
+        val aids: List<Int>,
+        /** true = listing was authenticated, false = public listing, null = backend cannot tell. */
+        val wasAuthenticated: Boolean? = null
+    ) : CardResponse
+
     data class DesfireApplicationSettings(
         val keySettings: Int,
         val maxKeys: Int? = null,
-        val keyType: DesfireKeyType? = null
+        val keyType: DesfireKeyType? = null,
+        /** true = supplied key authenticated, false = settings were obtained without authentication. */
+        val wasAuthenticated: Boolean? = null
+    ) : CardResponse
+
+    data class DesfireVersion(
+        val hardwareVendor: Int,
+        val hardwareType: Int,
+        val hardwareSubType: Int,
+        val hardwareMajor: Int,
+        val hardwareMinor: Int,
+        val hardwareStorageSize: Int,
+        val hardwareProtocol: Int,
+        val softwareVendor: Int,
+        val softwareType: Int,
+        val softwareSubType: Int,
+        val softwareMajor: Int,
+        val softwareMinor: Int,
+        val softwareStorageSize: Int,
+        val softwareProtocol: Int,
+        val productionWeek: Int? = null,
+        val productionYear: Int? = null
+    ) : CardResponse
+
+    data class DesfireFreeMemory(val bytes: Int) : CardResponse
+
+    data class DesfireFileIds(
+        val fileIds: List<Int>,
+        val wasAuthenticated: Boolean? = null
+    ) : CardResponse
+
+    data class DesfireFileSettings(
+        val fileNo: Int,
+        val fileType: DesfireFileType,
+        val communicationMode: DesfireCommunicationMode,
+        val accessRights: DesfireAccessRights,
+        val size: Int? = null,
+        val wasAuthenticated: Boolean? = null
     ) : CardResponse
 }
 
@@ -114,11 +157,22 @@ data class DesfireKey(
 ) {
     init {
         require(number in 0..15) { "DESFire key number must be between 0 and 15." }
+        val expected = when (type) {
+            DesfireKeyType.TDES_3K -> 24
+            DesfireKeyType.DES, DesfireKeyType.AES -> 16
+        }
+        require(bytes.size == expected) {
+            "DESFire $type key must contain exactly $expected bytes."
+        }
     }
 
     /** Best-effort secret erasure for temporary runtime key material. */
     fun clear() = bytes.fill(0)
 }
+
+data object DesfireGetVersion : CardCommand
+
+data object DesfireGetFreeMemory : CardCommand
 
 data class DesfireAuthenticate(
     val appId: Int,
@@ -133,6 +187,19 @@ data class DesfireReadApplicationSettings(
     val appId: Int,
     val key: DesfireKey?,
     val authenticateBeforeRead: Boolean
+) : CardCommand
+
+data class DesfireListFiles(
+    val appId: Int,
+    val key: DesfireKey? = null,
+    val authenticateBeforeRead: Boolean = key != null
+) : CardCommand
+
+data class DesfireReadFileSettings(
+    val appId: Int,
+    val fileNo: Int,
+    val key: DesfireKey? = null,
+    val authenticateBeforeRead: Boolean = key != null
 ) : CardCommand
 
 data class DesfireCreateApplication(
