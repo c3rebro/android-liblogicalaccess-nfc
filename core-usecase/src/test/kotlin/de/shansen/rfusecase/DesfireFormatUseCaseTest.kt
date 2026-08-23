@@ -36,6 +36,17 @@ class DesfireFormatUseCaseTest {
     }
 
     @Test
+    fun preflightRequiresPositiveDesfireVersionProbe() {
+        val backend = FakeFormatBackend(uid = uid, failVersion = true)
+
+        val result = DesfireFormatUseCase().preflight(backend)
+
+        assertFalse(result.isSuccess)
+        assertEquals(CardError.PROTOCOL_CONSTRAINT, result.error)
+        assertEquals(0, backend.formatCalls)
+    }
+
+    @Test
     fun authorizationRequiresExactConfirmationPhrase() {
         val backend = FakeFormatBackend(uid = uid)
         val preflight = requireNotNull(DesfireFormatUseCase().preflight(backend).value)
@@ -134,6 +145,21 @@ class DesfireFormatUseCaseTest {
     }
 
     @Test
+    fun failedDesfireProbeImmediatelyBeforeExecutionBlocksFormat() {
+        val service = DesfireFormatUseCase()
+        val backend = FakeFormatBackend(uid = uid)
+        val preflight = requireNotNull(service.preflight(backend).value)
+        val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
+        backend.failVersion = true
+
+        val result = service.execute(backend, authorization, key)
+
+        assertEquals(DesfireFormatStatus.FORMAT_FAILED, result.status)
+        assertFalse(result.formatCommandSent)
+        assertEquals(0, backend.formatCalls)
+    }
+
+    @Test
     fun nonDesfireCardCannotReachAuthorizationStage() {
         val backend = FakeFormatBackend(uid = uid, technology = CardTechnology.MIFARE_CLASSIC)
 
@@ -149,10 +175,12 @@ class DesfireFormatUseCaseTest {
         private val technology: CardTechnology = CardTechnology.MIFARE_DESFIRE,
         initialApps: List<Int> = emptyList(),
         private val failFormat: Boolean = false,
-        private val failDirectoryAfterFormat: Boolean = false
+        private val failDirectoryAfterFormat: Boolean = false,
+        failVersion: Boolean = false
     ) : CardBackend {
         private var apps = initialApps.toMutableList()
         private var formatCompleted = false
+        var failVersion: Boolean = failVersion
         var formatCalls: Int = 0
             private set
 
@@ -164,24 +192,30 @@ class DesfireFormatUseCaseTest {
         )
 
         override fun execute(command: CardCommand): CardResult<CardResponse> = when (command) {
-            DesfireGetVersion -> CardResult.ok(
-                CardResponse.DesfireVersion(
-                    hardwareVendor = 4,
-                    hardwareType = 1,
-                    hardwareSubType = 0,
-                    hardwareMajor = 1,
-                    hardwareMinor = 0,
-                    hardwareStorageSize = 0x1A,
-                    hardwareProtocol = 5,
-                    softwareVendor = 4,
-                    softwareType = 1,
-                    softwareSubType = 0,
-                    softwareMajor = 3,
-                    softwareMinor = 0,
-                    softwareStorageSize = 0x1A,
-                    softwareProtocol = 5
-                )
-            )
+            DesfireGetVersion -> {
+                if (failVersion) {
+                    CardResult.fail(CardError.PROTOCOL_CONSTRAINT, "DESFire GetVersion not supported")
+                } else {
+                    CardResult.ok(
+                        CardResponse.DesfireVersion(
+                            hardwareVendor = 4,
+                            hardwareType = 1,
+                            hardwareSubType = 0,
+                            hardwareMajor = 1,
+                            hardwareMinor = 0,
+                            hardwareStorageSize = 0x1A,
+                            hardwareProtocol = 5,
+                            softwareVendor = 4,
+                            softwareType = 1,
+                            softwareSubType = 0,
+                            softwareMajor = 3,
+                            softwareMinor = 0,
+                            softwareStorageSize = 0x1A,
+                            softwareProtocol = 5
+                        )
+                    )
+                }
+            }
 
             is DesfireListApplications -> {
                 if (formatCompleted && failDirectoryAfterFormat) {
