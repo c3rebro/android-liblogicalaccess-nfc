@@ -24,7 +24,7 @@ object BuiltInUseCaseCatalog {
     val desfireFormat = BuiltInUseCaseDescriptor(
         id = "desfire-format",
         title = "Format DESFire card",
-        description = "Delete all applications and files from the selected DESFire PICC. PICC key configuration is retained by DESFire format semantics.",
+        description = "Execute the destructive DESFire FORMAT_PICC operation after a read-only preflight and explicit confirmation of the card UID.",
         risk = BuiltInUseCaseRisk.DESTRUCTIVE
     )
 
