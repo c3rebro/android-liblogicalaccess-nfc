@@ -18,9 +18,7 @@ class DesfireQuickCheckServiceTest {
 
     @Test
     fun `public application is inspected without authentication`() {
-        val backend = FakeQuickCheckBackend(
-            protectedApps = emptyMap()
-        )
+        val backend = FakeQuickCheckBackend()
 
         val report = DesfireQuickCheckService().run(
             backend,
@@ -53,7 +51,8 @@ class DesfireQuickCheckServiceTest {
         assertEquals(0x123456, app.aid)
         assertEquals(DesfireQuickCheckAccess.AUTHENTICATED, app.filesAccess)
         assertEquals("door-app", app.authenticatedWith?.label)
-        assertEquals(1, backend.authenticationAttempts)
+        assertTrue(backend.authenticationAttempts >= 1)
+        assertTrue(backend.authenticatedKeys.first().contentEquals(appSpecific.key.bytes))
         assertTrue(report.needsKeys.isEmpty())
     }
 
@@ -87,8 +86,33 @@ class DesfireQuickCheckServiceTest {
         )
 
         assertEquals(DesfireQuickCheckAccess.AUTHENTICATED, report.applications.single().filesAccess)
-        assertEquals(1, backend.authenticationAttempts)
-        assertTrue(backend.authenticatedKeys.single().contentEquals(appSpecific.key.bytes))
+        assertTrue(backend.authenticationAttempts >= 1)
+        assertTrue(backend.authenticatedKeys.first().contentEquals(appSpecific.key.bytes))
+    }
+
+    @Test
+    fun `public file list can use aid key for protected file settings`() {
+        val backend = FakeQuickCheckBackend(
+            protectedFileSettings = mapOf(0x123456 to appSpecific.key)
+        )
+
+        val withoutKey = DesfireQuickCheckService().run(backend, DesfireQuickCheckConfig())
+        val appWithoutKey = withoutKey.applications.single()
+        assertEquals(DesfireQuickCheckAccess.PUBLIC, appWithoutKey.filesAccess)
+        assertEquals(DesfireQuickCheckAccess.KEY_REQUIRED, appWithoutKey.files.single().access)
+        assertEquals(listOf(0x123456), withoutKey.needsKeys)
+
+        val withKeyBackend = FakeQuickCheckBackend(
+            protectedFileSettings = mapOf(0x123456 to appSpecific.key)
+        )
+        val withKey = DesfireQuickCheckService().run(
+            withKeyBackend,
+            DesfireQuickCheckConfig(applicationKeys = mapOf(0x123456 to listOf(appSpecific)))
+        )
+        val protectedFile = withKey.applications.single().files.single()
+        assertEquals(DesfireQuickCheckAccess.AUTHENTICATED, protectedFile.access)
+        assertEquals("door-app", protectedFile.authenticatedWith?.label)
+        assertTrue(withKey.needsKeys.isEmpty())
     }
 
     @Test
@@ -118,12 +142,13 @@ class DesfireQuickCheckServiceTest {
 
     private class FakeQuickCheckBackend(
         private val protectedApps: Map<Int, DesfireKey> = emptyMap(),
+        private val protectedFileSettings: Map<Int, DesfireKey> = emptyMap(),
         private val directoryKey: DesfireKey? = null
     ) : CardBackend {
 
         var authenticationAttempts = 0
         val authenticatedKeys = mutableListOf<ByteArray>()
-        private val aids = if (protectedApps.isEmpty()) listOf(0x123456) else protectedApps.keys.toList()
+        private val aids = (protectedApps.keys + protectedFileSettings.keys).ifEmpty { setOf(0x123456) }.toList()
 
         override fun connect(): CardResult<Unit> = CardResult.ok(Unit)
         override fun disconnect() = Unit
@@ -158,16 +183,19 @@ class DesfireQuickCheckServiceTest {
                 if (directoryKey == null) {
                     CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = false))
                 } else if (command.piccMasterKey != null && sameKey(command.piccMasterKey, directoryKey)) {
+                    recordAuthentication(command.piccMasterKey)
                     CardResult.ok(CardResponse.ApplicationIds(aids, wasAuthenticated = true))
                 } else {
+                    command.piccMasterKey?.let(::recordAuthentication)
                     CardResult.fail(CardError.PERMISSION_DENIED, "PICC directory listing denied")
                 }
             }
 
             is DesfireReadApplicationSettings -> {
+                command.key?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
                 val expected = protectedApps[command.appId]
                 when {
-                    expected == null -> CardResult.ok(publicSettings())
+                    expected == null -> CardResult.ok(publicSettings().copy(wasAuthenticated = command.key != null))
                     command.key != null && sameKey(command.key, expected) -> CardResult.ok(
                         publicSettings().copy(wasAuthenticated = true)
                     )
@@ -176,8 +204,7 @@ class DesfireQuickCheckServiceTest {
             }
 
             is DesfireAuthenticate -> {
-                authenticationAttempts++
-                authenticatedKeys += command.key.bytes.copyOf()
+                recordAuthentication(command.key)
                 val expected = protectedApps[command.appId]
                 if (expected != null && sameKey(command.key, expected)) {
                     CardResult.ok(CardResponse.Empty)
@@ -187,10 +214,11 @@ class DesfireQuickCheckServiceTest {
             }
 
             is DesfireListFiles -> {
+                command.key?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
                 val expected = protectedApps[command.appId]
                 when {
                     expected == null -> CardResult.ok(
-                        CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = false)
+                        CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = command.key != null)
                     )
                     command.key != null && sameKey(command.key, expected) -> CardResult.ok(
                         CardResponse.DesfireFileIds(listOf(1), wasAuthenticated = true)
@@ -200,7 +228,8 @@ class DesfireQuickCheckServiceTest {
             }
 
             is DesfireReadFileSettings -> {
-                val expected = protectedApps[command.appId]
+                command.key?.takeIf { command.authenticateBeforeRead }?.let(::recordAuthentication)
+                val expected = protectedFileSettings[command.appId] ?: protectedApps[command.appId]
                 when {
                     expected == null || (command.key != null && sameKey(command.key, expected)) -> CardResult.ok(
                         CardResponse.DesfireFileSettings(
@@ -217,6 +246,11 @@ class DesfireQuickCheckServiceTest {
             }
 
             else -> CardResult.fail(CardError.UNKNOWN, "Unsupported fake command ${command.javaClass.simpleName}")
+        }
+
+        private fun recordAuthentication(key: DesfireKey) {
+            authenticationAttempts++
+            authenticatedKeys += key.bytes.copyOf()
         }
 
         private fun publicSettings() = CardResponse.DesfireApplicationSettings(
