@@ -48,6 +48,7 @@ android {
 
 dependencies {
     implementation(project(":core-project"))
+    implementation(project(":core-usecase"))
     implementation(project(":rfidgear-runtime"))
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
