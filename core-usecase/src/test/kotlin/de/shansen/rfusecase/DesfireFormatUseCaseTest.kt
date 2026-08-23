@@ -43,6 +43,9 @@ class DesfireFormatUseCaseTest {
         assertFailsWith<IllegalArgumentException> {
             DesfireFormatAuthorization.confirm(preflight, "FORMAT OTHER")
         }
+        assertFailsWith<IllegalArgumentException> {
+            DesfireFormatAuthorization.confirm(preflight, " ${preflight.confirmationPhrase} ")
+        }
     }
 
     @Test
@@ -57,6 +60,8 @@ class DesfireFormatUseCaseTest {
 
         assertEquals(DesfireFormatStatus.CARD_MISMATCH, result.status)
         assertFalse(result.formatCommandSent)
+        assertFalse(result.commandReportedSuccess)
+        assertFalse(result.verifiedSuccess)
         assertEquals(0, secondBackend.formatCalls)
     }
 
@@ -70,10 +75,30 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.SUCCESS_VERIFIED, result.status)
-        assertTrue(result.succeeded)
+        assertTrue(result.commandReportedSuccess)
+        assertTrue(result.verifiedSuccess)
         assertTrue(result.formatCommandSent)
         assertEquals(1, backend.formatCalls)
         assertEquals(emptyList(), result.remainingApplicationIds)
+    }
+
+    @Test
+    fun formatSuccessWithoutDirectoryVerificationIsNotReportedAsVerified() {
+        val service = DesfireFormatUseCase()
+        val backend = FakeFormatBackend(
+            uid = uid,
+            initialApps = listOf(0x123456),
+            failDirectoryAfterFormat = true
+        )
+        val preflight = requireNotNull(service.preflight(backend).value)
+        val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
+
+        val result = service.execute(backend, authorization, key)
+
+        assertEquals(DesfireFormatStatus.SUCCESS_UNVERIFIED, result.status)
+        assertTrue(result.commandReportedSuccess)
+        assertFalse(result.verifiedSuccess)
+        assertEquals(1, backend.formatCalls)
     }
 
     @Test
@@ -86,6 +111,8 @@ class DesfireFormatUseCaseTest {
         val result = service.execute(backend, authorization, key)
 
         assertEquals(DesfireFormatStatus.FORMAT_FAILED, result.status)
+        assertFalse(result.commandReportedSuccess)
+        assertFalse(result.verifiedSuccess)
         assertEquals(CardError.AUTH_FAILURE, result.formatError)
         assertEquals(1, backend.formatCalls)
     }
@@ -105,9 +132,11 @@ class DesfireFormatUseCaseTest {
         private val uid: ByteArray,
         private val technology: CardTechnology = CardTechnology.MIFARE_DESFIRE,
         initialApps: List<Int> = emptyList(),
-        private val failFormat: Boolean = false
+        private val failFormat: Boolean = false,
+        private val failDirectoryAfterFormat: Boolean = false
     ) : CardBackend {
         private var apps = initialApps.toMutableList()
+        private var formatCompleted = false
         var formatCalls: Int = 0
             private set
 
@@ -138,9 +167,15 @@ class DesfireFormatUseCaseTest {
                 )
             )
 
-            is DesfireListApplications -> CardResult.ok(
-                CardResponse.ApplicationIds(apps.toList(), wasAuthenticated = command.piccMasterKey != null)
-            )
+            is DesfireListApplications -> {
+                if (formatCompleted && failDirectoryAfterFormat) {
+                    CardResult.fail(CardError.PERMISSION_DENIED, "Directory verification unavailable")
+                } else {
+                    CardResult.ok(
+                        CardResponse.ApplicationIds(apps.toList(), wasAuthenticated = command.piccMasterKey != null)
+                    )
+                }
+            }
 
             is DesfireFormatCard -> {
                 formatCalls++
@@ -148,6 +183,7 @@ class DesfireFormatUseCaseTest {
                     CardResult.fail(CardError.AUTH_FAILURE, "PICC authentication failed")
                 } else {
                     apps.clear()
+                    formatCompleted = true
                     CardResult.ok(CardResponse.Empty)
                 }
             }
