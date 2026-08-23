@@ -13,15 +13,23 @@ import de.shansen.rfcard.DesfireListApplications
 
 /**
  * Read-only information gathered before the destructive FORMAT_PICC command is authorized.
+ *
+ * Instances can only be created by this module after a successful protocol-level DESFire
+ * preflight. The UID used for confirmation is stored separately so callers cannot change the
+ * authorization target by mutating the public CardIdentity byte array.
  */
-data class DesfireFormatPreflight(
+class DesfireFormatPreflight internal constructor(
     val identity: CardIdentity,
-    val version: CardResponse.DesfireVersion?,
+    val version: CardResponse.DesfireVersion,
     val visibleApplicationIds: List<Int>?,
     val warnings: List<String> = emptyList()
 ) {
+    private val confirmedUid = identity.uid.copyOf()
+
     val confirmationPhrase: String
-        get() = "FORMAT ${identity.uid.toHex()}"
+        get() = "FORMAT ${confirmedUid.toHex()}"
+
+    internal fun authorizationUidCopy(): ByteArray = confirmedUid.copyOf()
 }
 
 /**
@@ -50,7 +58,7 @@ class DesfireFormatAuthorization private constructor(
             require(typedPhrase == preflight.confirmationPhrase) {
                 "Confirmation must exactly match '${preflight.confirmationPhrase}'."
             }
-            return DesfireFormatAuthorization(preflight.identity.uid.copyOf())
+            return DesfireFormatAuthorization(preflight.authorizationUidCopy())
         }
     }
 }
@@ -88,6 +96,8 @@ data class DesfireFormatResult(
  *
  * Safety invariants:
  * - preflight is read-only and requires a successful DESFire GetVersion probe;
+ * - a preflight cannot be constructed by application/UI code;
+ * - the confirmation target uses an immutable internal UID snapshot;
  * - execution requires an authorization created from the preflight confirmation phrase;
  * - the card UID is checked again before FORMAT_PICC is sent;
  * - a fresh DESFire GetVersion probe must succeed immediately before the destructive command;
