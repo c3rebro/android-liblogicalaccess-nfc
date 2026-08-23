@@ -83,6 +83,22 @@ class DesfireFormatUseCaseTest {
     }
 
     @Test
+    fun formatAuthorizationCanBeUsedForOnlyOneAttempt() {
+        val service = DesfireFormatUseCase()
+        val backend = FakeFormatBackend(uid = uid, failFormat = true)
+        val preflight = requireNotNull(service.preflight(backend).value)
+        val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
+
+        val first = service.execute(backend, authorization, key)
+        val second = service.execute(backend, authorization, key)
+
+        assertEquals(DesfireFormatStatus.FORMAT_FAILED, first.status)
+        assertEquals(DesfireFormatStatus.AUTHORIZATION_CONSUMED, second.status)
+        assertFalse(second.formatCommandSent)
+        assertEquals(1, backend.formatCalls)
+    }
+
+    @Test
     fun formatSuccessWithoutDirectoryVerificationIsNotReportedAsVerified() {
         val service = DesfireFormatUseCase()
         val backend = FakeFormatBackend(
