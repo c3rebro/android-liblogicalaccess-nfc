@@ -10,6 +10,7 @@ The Android app can execute fixed workflows without an RFIDGear `.rfPrj` file. T
 | --- | --- | --- |
 | DESFire Quick Check | READ_ONLY | Runtime/native path implemented; physical verification pending |
 | DESFire Format | DESTRUCTIVE | Read-only preflight implemented; native FORMAT_PICC execution intentionally disabled |
+| DESFire Factory Reset | DESTRUCTIVE | Read-only preflight + full core state machine implemented; destructive native execution intentionally disabled |
 
 ## DESFire format safety model
 
@@ -60,9 +61,52 @@ erase()
 
 In liblogicalaccess 3.7.0, `DESFireISO7816Commands::erase()` sends `DF_INS_FORMAT_PICC` and requires status `91 00`. A later Android native-format implementation should mirror this sequence rather than inventing a separate APDU path.
 
+## DESFire Factory Reset
+
+Factory Reset is intentionally a separate built-in workflow from Format.
+
+The target state is:
+
+- all applications and files are removed through `FORMAT_PICC`;
+- PICC master key number `0` is changed to DES / 2K3DES-compatible format;
+- the key value is 16 zero bytes, i.e. `00000000000000000000000000000000` (32 hexadecimal zero characters);
+- the key version is `0`.
+
+This definition matches RFIDGear's documented DESFire factory key convention: DES uses a 16-byte DES/2K3DES representation. The Factory Reset use case currently **does not change PICC key-settings bits**; that would be a separate explicit requirement if needed later.
+
+Factory Reset uses its own confirmation phrase:
+
+```text
+FACTORY RESET <UID>
+```
+
+The destructive core sequence is:
+
+```text
+read-only preflight
+  -> exact UID-bound confirmation
+  -> fresh GetVersion on the same card
+  -> FORMAT_PICC once
+  -> change PICC master key #0 once to DES / 16x00 / version 0
+  -> authenticate with the new factory key
+  -> verify that the application directory is empty
+```
+
+No destructive step is automatically retried. In particular, if `FORMAT_PICC` succeeds but the PICC key change fails, the result is `FORMATTED_KEY_RESET_FAILED`: the card is known to have been formatted, but the factory key target was not reached. The workflow must not automatically format the card a second time.
+
+`DesfireChangePiccMasterKey` is a dedicated core command so a future native encoder backend can implement the exact PICC operation without manufacturing application-key settings. Its expected native sequence is:
+
+```text
+selectApplication(0)
+authenticate(0, current PICC master key)
+changeKey(0, factory DES zero key)
+```
+
+The current Android native backend remains read-only, so the Android UI exposes only the Factory Reset preflight. No `FORMAT_PICC` or `changeKey` command is reachable from the current UI/backend combination.
+
 ## UID binding limitation
 
-The first implementation binds destructive authorization to Android's presented NFC UID. DESFire configurations using randomized/privacy UIDs may present a different identifier on a later scan. This is intentionally a safe failure (the format operation is blocked), but a later implementation may need a stable card fingerprint derived from authenticated/version data before format execution can be enabled for such cards.
+The first implementation binds destructive authorization to Android's presented NFC UID. DESFire configurations using randomized/privacy UIDs may present a different identifier on a later scan. This is intentionally a safe failure (the destructive operation is blocked), but a later implementation may need a stable card fingerprint derived from authenticated/version data before format/factory-reset execution can be enabled for such cards.
 
 ## Architectural rule
 
