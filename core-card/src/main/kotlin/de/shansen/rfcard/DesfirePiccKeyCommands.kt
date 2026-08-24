@@ -21,6 +21,23 @@ data class DesfireChangePiccMasterKey(
             "New DESFire PICC master key must use key number 0."
         }
     }
+
+    /**
+     * Compatibility constructor for callers that provide a version separately. The key object
+     * remains the single source of truth; a conflicting version is rejected.
+     */
+    constructor(
+        currentPiccMasterKey: DesfireKey,
+        newPiccMasterKey: DesfireKey,
+        newKeyVersion: Int
+    ) : this(currentPiccMasterKey, newPiccMasterKey) {
+        require(newKeyVersion in 0..0xFF) {
+            "DESFire key version must be between 0 and 255."
+        }
+        require(newPiccMasterKey.version == null || newPiccMasterKey.version == newKeyVersion) {
+            "New PICC master-key version must match newPiccMasterKey.version."
+        }
+    }
 }
 
 /** Factory defaults intentionally return fresh mutable key material for every call. */
