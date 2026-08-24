@@ -7,11 +7,11 @@ package de.shansen.rfcard
  * destructive workflows do not need to manufacture application-key settings merely to change
  * the PICC master key. A native encoder backend is expected to implement this as:
  * selectApplication(0) -> authenticate(0, currentPiccMasterKey) -> changeKey(0, newPiccMasterKey).
+ * The target key version, when relevant to the algorithm, is carried by [newPiccMasterKey].
  */
 data class DesfireChangePiccMasterKey(
     val currentPiccMasterKey: DesfireKey,
-    val newPiccMasterKey: DesfireKey,
-    val newKeyVersion: Int = 0
+    val newPiccMasterKey: DesfireKey
 ) : CardCommand {
     init {
         require(currentPiccMasterKey.number == 0) {
@@ -19,9 +19,6 @@ data class DesfireChangePiccMasterKey(
         }
         require(newPiccMasterKey.number == 0) {
             "New DESFire PICC master key must use key number 0."
-        }
-        require(newKeyVersion in 0..0xFF) {
-            "DESFire key version must be between 0 and 255."
         }
     }
 }
