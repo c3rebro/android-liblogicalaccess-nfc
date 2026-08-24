@@ -21,14 +21,17 @@ class DesfireQuickCheckService {
 
         return try {
             val identityResult = backend.identify()
-            if (!identityResult.isSuccess || identityResult.value == null) {
+            if (!identityResult.isSuccess) {
                 return DesfireQuickCheckReport.failed(
                     identityResult.error,
                     identityResult.message ?: "Unable to identify card."
                 )
             }
+            val identity = identityResult.value ?: return DesfireQuickCheckReport.failed(
+                CardError.UNKNOWN,
+                identityResult.message ?: "Card backend returned no identity."
+            )
 
-            val identity = identityResult.value
             if (identity.technology != CardTechnology.MIFARE_DESFIRE) {
                 return DesfireQuickCheckReport.failed(
                     CardError.PROTOCOL_CONSTRAINT,

@@ -9,10 +9,40 @@
         android:orientation="vertical"
         android:padding="24dp">
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Built-in DESFire use cases"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/selectQuickCheckUseCase"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Quick Check (read only)" />
+
+        <Button
+            android:id="@+id/selectFormatUseCase"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Prepare DESFire format (destructive)" />
+
+        <TextView
+            android:id="@+id/activeUseCaseSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Active use case: DESFire Quick Check"
+            android:textIsSelectable="true" />
+
         <Button
             android:id="@+id/openProject"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
             android:text="Open RFIDGear project" />
 
         <TextView
@@ -46,6 +76,14 @@
             android:text="No application-specific quick-check keys configured."
             android:textIsSelectable="true"
             android:typeface="monospace" />
+
+        <Button
+            android:id="@+id/exportQuickCheckPdf"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:enabled="false"
+            android:text="Export last Quick Check as PDF" />
 
         <TextView
             android:id="@+id/status"

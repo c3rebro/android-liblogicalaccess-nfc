@@ -13,12 +13,13 @@ import androidx.appcompat.app.AppCompatActivity
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
 import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
 import de.shansen.rfcard.DesfireKeyType
-import de.shansen.rfidgearruntime.DesfireApplicationQuickCheck
-import de.shansen.rfidgearruntime.DesfireQuickCheckAccess
 import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
 import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
-import de.shansen.rfidgearruntime.DesfireQuickCheckReport
+import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocument
+import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocumentFactory
+import de.shansen.rfidgearruntime.DesfireQuickCheckReportEnvironment
 import de.shansen.rfidgearruntime.DesfireQuickCheckService
+import de.shansen.rfidgearruntime.DesfireQuickCheckTextRenderer
 import de.shansen.rfidgearruntime.RfidGearAction
 import de.shansen.rfidgearruntime.RfidGearActionSafetyPolicy
 import de.shansen.rfidgearruntime.RfidGearTaskCompiler
@@ -26,17 +27,52 @@ import de.shansen.rfproject.RfExecutionPlanCompiler
 import de.shansen.rfproject.RfProjectReader
 import de.shansen.rfproject.RfProjectValidator
 import de.shansen.rfproject.RfValidationSeverity
+import de.shansen.rfusecase.BuiltInUseCaseCatalog
+import de.shansen.rfusecase.DesfireFormatPreflight
+import de.shansen.rfusecase.DesfireFormatUseCase
+import java.time.OffsetDateTime
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
+
+    private enum class ActiveScanUseCase {
+        QUICK_CHECK,
+        FORMAT_PREFLIGHT
+    }
 
     private lateinit var binding: ActivityMainBinding
     private var adapter: NfcAdapter? = null
     private val projectReader = RfProjectReader()
     private val quickCheckService = DesfireQuickCheckService()
+    private val formatUseCase = DesfireFormatUseCase()
     private var quickCheckConfig = DesfireQuickCheckConfig()
+    private var lastQuickCheckDocument: DesfireQuickCheckReportDocument? = null
+    private var lastFormatPreflight: DesfireFormatPreflight? = null
+    private var activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
 
     private val openProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadProject(uri)
+    }
+
+    private val createQuickCheckPdf = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val document = lastQuickCheckDocument ?: return@registerForActivityResult
+
+        Thread {
+            val result = runCatching {
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    DesfireQuickCheckPdfRenderer().write(document, output)
+                } ?: error("Unable to open the selected PDF destination.")
+            }
+            runOnUiThread {
+                result.onSuccess {
+                    binding.status.text = "Quick Check PDF exported."
+                }.onFailure { error ->
+                    binding.status.text = "PDF export failed: ${error.message ?: error.javaClass.simpleName}"
+                }
+            }
+        }.start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +80,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        binding.selectQuickCheckUseCase.setOnClickListener {
+            selectQuickCheckUseCase()
+        }
+        binding.selectFormatUseCase.setOnClickListener {
+            selectFormatPreflightUseCase()
+        }
         binding.openProject.setOnClickListener {
             openProject.launch(arrayOf("*/*"))
         }
@@ -53,7 +95,17 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         binding.clearQuickCheckKeys.setOnClickListener {
             clearSessionQuickCheckKeys()
         }
+        binding.exportQuickCheckPdf.setOnClickListener {
+            val document = lastQuickCheckDocument
+            if (document == null) {
+                binding.status.text = "Run a DESFire Quick Check before exporting a PDF."
+            } else {
+                val uid = document.card.uid.ifBlank { "unknown" }
+                createQuickCheckPdf.launch("desfire-quick-check-$uid.pdf")
+            }
+        }
         updateQuickCheckKeySummary()
+        updateActiveUseCaseSummary()
 
         adapter = NfcAdapter.getDefaultAdapter(this)
         binding.status.text = when {
@@ -82,6 +134,29 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     override fun onPause() {
         adapter?.disableReaderMode(this)
         super.onPause()
+    }
+
+    private fun selectQuickCheckUseCase() {
+        activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+        updateActiveUseCaseSummary()
+        binding.status.text = "Quick Check selected. Hold a DESFire card near the phone."
+    }
+
+    private fun selectFormatPreflightUseCase() {
+        activeScanUseCase = ActiveScanUseCase.FORMAT_PREFLIGHT
+        lastFormatPreflight = null
+        updateActiveUseCaseSummary()
+        binding.status.text =
+            "Format preflight selected. Present the DESFire card to inspect it. No format command will be sent."
+    }
+
+    private fun updateActiveUseCaseSummary() {
+        binding.activeUseCaseSummary.text = when (activeScanUseCase) {
+            ActiveScanUseCase.QUICK_CHECK ->
+                "Active use case: ${BuiltInUseCaseCatalog.desfireQuickCheck.title} [READ ONLY]"
+            ActiveScanUseCase.FORMAT_PREFLIGHT ->
+                "Active use case: ${BuiltInUseCaseCatalog.desfireFormat.title} [DESTRUCTIVE] - preflight only"
+        }
     }
 
     private fun showAddQuickCheckKeyDialog(prefillAid: Int? = null) {
@@ -226,7 +301,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     }
 
                     appendLine()
-                    appendLine("Project execution is still disabled; DESFire Quick Check is read-only and independent of project execution.")
+                    appendLine("Project execution is still disabled; built-in DESFire use cases are independent of .rfPrj execution.")
                 }
             }
 
@@ -253,7 +328,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     override fun onTagDiscovered(tag: Tag) {
         val uidText = tag.id.toHex()
-        val techs = tag.techList.joinToString()
+        val techList = tag.techList.toList()
+        val techs = techList.joinToString()
 
         val isoDep = IsoDep.get(tag)
         if (isoDep == null) {
@@ -271,31 +347,15 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             val transport = AndroidIsoDepTransport(isoDep)
             NativeBridge.attachTransport(transport)
 
-            runOnUiThread {
-                binding.status.text = "DESFire Quick Check running... keep the card in the NFC field."
+            if (activeScanUseCase == ActiveScanUseCase.FORMAT_PREFLIGHT) {
+                runFormatPreflight(tag, uidText)
+                return
             }
 
-            val report = quickCheckService.run(
-                backend = NativeDesfireCardBackend(tag.id),
-                config = quickCheckConfig
-            )
-
-            runOnUiThread {
-                binding.details.text = formatQuickCheckReport(report, uidText, techs, isoDep.maxTransceiveLength)
-                val firstMissingKeyAid = report.needsKeys.firstOrNull()
-                binding.status.text = when {
-                    report.error != null -> "Quick Check failed: ${report.errorMessage ?: report.error.rfidGearName}"
-                    firstMissingKeyAid != null -> "Quick Check partial: AID 0x%06X requires authentication.".format(firstMissingKeyAid)
-                    else -> "Quick Check complete (read-only)."
-                }
-
-                if (firstMissingKeyAid != null && !isFinishing) {
-                    showAddQuickCheckKeyDialog(firstMissingKeyAid)
-                }
-            }
+            runQuickCheck(tag, isoDep, techList)
         } catch (e: Exception) {
             runOnUiThread {
-                binding.status.text = "NFC/Quick Check error: ${e.message}"
+                binding.status.text = "NFC/use-case error: ${e.message}"
                 binding.details.text = "UID: $uidText\nTechnologies: $techs\nNative bridge: ${NativeBridge.version()}"
             }
         } finally {
@@ -304,91 +364,119 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    private fun formatQuickCheckReport(
-        report: DesfireQuickCheckReport,
-        uidText: String,
-        techs: String,
-        maxTransceive: Int
-    ): String = buildString {
-        appendLine("DESFire Quick Check (READ ONLY)")
-        appendLine("UID: $uidText")
-        appendLine("Technologies: $techs")
-        appendLine("Max transceive: $maxTransceive")
-        appendLine("Native bridge: ${NativeBridge.version()}")
+    private fun runQuickCheck(tag: Tag, isoDep: IsoDep, techList: List<String>) {
+        runOnUiThread {
+            binding.status.text = "DESFire Quick Check running... keep the card in the NFC field."
+        }
 
-        report.version?.let { version ->
-            appendLine(
-                "Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, " +
-                    "SW ${version.softwareMajor}.${version.softwareMinor}, " +
-                    "storage=0x%02X".format(version.hardwareStorageSize)
+        val report = quickCheckService.run(
+            backend = NativeDesfireCardBackend(tag.id),
+            config = quickCheckConfig
+        )
+        val document = DesfireQuickCheckReportDocumentFactory.from(
+            report = report,
+            generatedAt = OffsetDateTime.now().toString(),
+            environment = DesfireQuickCheckReportEnvironment(
+                nfcTechnologies = techList,
+                maxTransceiveLength = isoDep.maxTransceiveLength,
+                backendVersion = NativeBridge.version()
             )
-            appendLine("Production: week=0x%02X year=%02d".format(version.productionWeek ?: 0, version.productionYear ?: 0))
-        }
-        report.freeMemoryBytes?.let { appendLine("Free memory: $it bytes") }
+        )
 
-        append("Application directory: ${report.directoryAccess}")
-        report.directoryAuthenticatedWith?.let { append(" using ${it.label} [${keyTypeLabel(it.type)} #${it.number}]") }
-        appendLine()
+        runOnUiThread {
+            lastQuickCheckDocument = document
+            binding.exportQuickCheckPdf.isEnabled = true
+            binding.details.text = DesfireQuickCheckTextRenderer.render(document)
 
-        if (report.applications.isEmpty()) {
-            appendLine("Applications: none visible")
-        } else {
-            appendLine("Applications: ${report.applications.size}")
-            report.applications.forEach { app -> appendApplication(app) }
+            val firstMissingKeyAid = report.needsKeys.firstOrNull()
+            val reportError = report.error
+            binding.status.text = when {
+                reportError != null -> "Quick Check failed: ${report.errorMessage ?: reportError.rfidGearName}"
+                firstMissingKeyAid != null -> "Quick Check partial: AID 0x%06X requires authentication.".format(firstMissingKeyAid)
+                else -> "Quick Check complete (read-only)."
+            }
+
+            if (firstMissingKeyAid != null && !isFinishing) {
+                showAddQuickCheckKeyDialog(firstMissingKeyAid)
+            }
+        }
+    }
+
+    private fun runFormatPreflight(tag: Tag, uidText: String) {
+        runOnUiThread {
+            binding.status.text = "DESFire format preflight running (read only)... keep the card in the NFC field."
         }
 
-        if (report.warnings.isNotEmpty()) {
-            appendLine("Warnings:")
-            report.warnings.forEach { appendLine("  - $it") }
-        }
-        report.error?.let {
-            appendLine("ERROR ${it.rfidGearName}: ${report.errorMessage.orEmpty()}")
-        }
-    }.trimEnd()
+        val result = formatUseCase.preflight(NativeDesfireCardBackend(tag.id))
 
-    private fun StringBuilder.appendApplication(app: DesfireApplicationQuickCheck) {
-        appendLine()
-        appendLine("AID 0x%06X (%d)".format(app.aid, app.aid))
-        appendLine("  Settings: ${app.settingsAccess}")
-        app.settings?.let { settings ->
-            appendLine("    Key settings: 0x%02X".format(settings.keySettings))
-            settings.maxKeys?.let { appendLine("    Max keys: $it") }
-            settings.keyType?.let { appendLine("    Key type: ${keyTypeLabel(it)}") }
-        }
-        append("  File listing: ${app.filesAccess}")
-        app.authenticatedWith?.let { append(" using ${it.label} [${keyTypeLabel(it.type)} #${it.number}]") }
-        appendLine()
+        runOnUiThread {
+            // A destructive use case must never stay armed after one scan. A future execution
+            // stage will require a fresh explicit confirmation after this preflight.
+            activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+            updateActiveUseCaseSummary()
 
-        if (app.files.isEmpty()) {
-            appendLine("    Files: none/read denied")
-        } else {
-            app.files.forEach { file ->
-                append("    File ${file.fileNo}: ${file.access}")
-                file.settings?.let { settings ->
-                    append(" ${settings.fileType}")
-                    settings.size?.let { append(" size=$it") }
-                    append(" ${settings.communicationMode}")
-                    append(" R=${accessRight(settings.accessRights.read)}")
-                    append(" W=${accessRight(settings.accessRights.write)}")
-                    append(" RW=${accessRight(settings.accessRights.readWrite)}")
-                    append(" C=${accessRight(settings.accessRights.change)}")
+            if (!result.isSuccess) {
+                binding.status.text = "Format preflight failed: ${result.message ?: result.error.rfidGearName}"
+                binding.details.text = "UID: $uidText\nNo format command was sent."
+                return@runOnUiThread
+            }
+
+            val preflight = result.value
+            if (preflight == null) {
+                binding.status.text = "Format preflight failed: backend returned no preflight result."
+                binding.details.text = "UID: $uidText\nNo format command was sent."
+                return@runOnUiThread
+            }
+
+            lastFormatPreflight = preflight
+            binding.status.text = "Format preflight complete (read only). No format command was sent."
+            binding.details.text = formatFormatPreflight(preflight)
+            showFormatPreflightDialog(preflight)
+        }
+    }
+
+    private fun formatFormatPreflight(preflight: DesfireFormatPreflight): String = buildString {
+        appendLine("DESFire Format Preflight (READ ONLY)")
+        appendLine("UID: ${preflight.identity.uid.toHex()}")
+        val version = preflight.version
+        appendLine("Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, SW ${version.softwareMajor}.${version.softwareMinor}")
+
+        val applicationIds = preflight.visibleApplicationIds
+        when {
+            applicationIds == null ->
+                appendLine("Applications: protected/unavailable during public preflight")
+            applicationIds.isEmpty() ->
+                appendLine("Applications: none visible")
+            else -> {
+                appendLine("Applications: ${applicationIds.size}")
+                applicationIds.sorted().forEach { aid ->
+                    appendLine("  - AID 0x%06X".format(aid))
                 }
-                file.message?.takeIf { it.isNotBlank() }?.let { append(" [$it]") }
-                appendLine()
             }
         }
 
-        if (app.attemptedKeys.isNotEmpty()) {
-            appendLine("  Tried keys:")
-            app.attemptedKeys.forEach { appendLine("    - ${it.label} [${keyTypeLabel(it.type)} #${it.number}]") }
+        if (preflight.warnings.isNotEmpty()) {
+            appendLine("Warnings:")
+            preflight.warnings.forEach { appendLine("  - $it") }
         }
-        app.message?.takeIf { it.isNotBlank() }?.let { appendLine("  Note: $it") }
-    }
+        appendLine()
+        appendLine("Confirmation phrase for a future format step:")
+        appendLine(preflight.confirmationPhrase)
+        appendLine()
+        appendLine("FORMAT_PICC execution is not enabled in the Android native backend yet.")
+    }.trimEnd()
 
-    private fun accessRight(value: Int): String = when (value) {
-        0x0E -> "FREE"
-        0x0F -> "NEVER"
-        else -> "KEY$value"
+    private fun showFormatPreflightDialog(preflight: DesfireFormatPreflight) {
+        if (isFinishing) return
+        AlertDialog.Builder(this)
+            .setTitle("DESFire format preflight")
+            .setMessage(
+                "Read-only preflight completed for UID ${preflight.identity.uid.toHex()}.\n\n" +
+                    "Future destructive confirmation phrase:\n${preflight.confirmationPhrase}\n\n" +
+                    "The native FORMAT_PICC execution path is intentionally not enabled yet. No card data was changed."
+            )
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun ByteArray.toHex(): String =

@@ -1,0 +1,40 @@
+name: Core tests and Android compile
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Run hardware-independent tests
+        run: gradle --no-daemon :core-project:test :core-execution:test :core-usecase:test :rfidgear-runtime:test
+
+      - name: Compile Android Kotlin/UI sources
+        run: gradle --no-daemon :app:compileDebugKotlin

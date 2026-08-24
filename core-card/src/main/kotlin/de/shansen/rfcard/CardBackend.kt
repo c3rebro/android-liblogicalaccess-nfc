@@ -280,4 +280,10 @@ data class DesfireChangeKeySettings(
 
 data class DesfireFormatCard(
     val piccMasterKey: DesfireKey
-) : CardCommand
+) : CardCommand {
+    init {
+        require(piccMasterKey.number == 0) {
+            "DESFire FORMAT_PICC requires the PICC master key (key number 0)."
+        }
+    }
+}

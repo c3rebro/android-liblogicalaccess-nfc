@@ -1,60 +1,74 @@
 # Android RFIDGear Encoder
 
-Android card-encoding runtime driven by project files created with `c3rebro/RFiDGear`.
+Android DESFire/RFID runtime that can execute both RFIDGear project workflows and fixed built-in card use cases.
 
-The application is intentionally split into a project parser/compiler, a deterministic execution engine and a replaceable card backend. RFIDGear remains the authoring tool while Android acts as the portable runtime/encoder.
+RFIDGear remains the authoring tool for `.rfPrj` workflows, while Android acts as the portable runtime/encoder. Built-in tools such as DESFire Quick Check and DESFire Format do not require a project file.
 
 ## Target architecture
 
 ```text
-.rfPrj (RFIDGear)
-        |
-        v
-+-------------------+
-| core-project      |  ZIP/XML parsing, validation, task IDs/conditions
-+-------------------+
-        |
-        v
-+-------------------+
-| rfidgear-runtime  |  persisted RFIDGear fields -> typed card actions
-+-------------------+
-        |
-        +--------------------+
-        |                    |
-        v                    v
-+-------------------+  +-------------------+
-| core-execution    |  | core-card         |
-| task sequencing   |  | card backend API  |
-| error conditions  |  | DESFire commands  |
-+-------------------+  +-------------------+
-                              |
-                              v
-                      Android NFC / IsoDep
-                              |
-                              v
-                         JNI / C++
-                              |
-                              v
-                       liblogicalaccess
+.rfPrj (RFIDGear)                  Built-in use cases
+        |                                  |
+        v                                  v
++-------------------+              +-------------------+
+| core-project      |              | core-usecase      |
+| ZIP/XML parsing   |              | fixed workflows   |
++-------------------+              +-------------------+
+        |                                  |
+        v                                  |
++-------------------+                      |
+| rfidgear-runtime  |                      |
+| fields -> actions |                      |
++-------------------+                      |
+        |                                  |
+        +------------------+---------------+
+                           |
+                           v
+                   +-------------------+
+                   | core-card         |
+                   | card command API  |
+                   +-------------------+
+                           |
+                           v
+                    Android NFC / IsoDep
+                           |
+                           v
+                      JNI / C++
+                           |
+                           v
+                    liblogicalaccess
 ```
+
+`core-execution` provides RFIDGear task sequencing/condition handling independently from the card backend.
 
 ## RFIDGear project support
 
 RFIDGear `.rfPrj` files are ZIP archives containing `taskdatabase.xml`. Plain XML project files are also accepted for diagnostics. See [`docs/RFPRJ_FORMAT.md`](docs/RFPRJ_FORMAT.md) for the compatibility contract reconstructed from the current RFIDGear source.
 
-The Android app can open a project and show a safe per-task preview:
+The Android app can open a project and show a safe per-task preview. The preview separates:
 
-- `SUPPORTED` — project fields can be compiled into a typed runtime action;
-- `UNSUPPORTED` — the RFIDGear operation is known, but intentionally not enabled yet;
-- `INVALID` — required project fields are missing or invalid.
+- read-only actions that are mapped by the current Android backend;
+- read-only actions that are understood but not mapped yet;
+- mutating operations that remain disabled;
+- destructive operations that remain blocked;
+- unsupported/invalid project operations.
 
-No secret key values or write payloads are printed by the project preview.
+No secret key values or write payloads are printed by the project preview. Project-driven write execution is still disabled while the runtime/compiler contract is being completed.
 
-Project-driven write execution is still disabled while the runtime/compiler contract is being completed.
+## Built-in use cases
+
+Built-in workflows are independent of `.rfPrj` files and reuse the same platform-neutral `CardCommand` model.
+
+Currently modelled:
+
+- **DESFire Quick Check** - read-only inspection of applications, files, communication modes and access rights.
+- **DESFire Format** - destructive workflow with a read-only preflight, UID-bound confirmation and explicit no-auto-retry semantics. Native `FORMAT_PICC` execution is intentionally not enabled yet.
+
+See [`docs/BUILT_IN_USE_CASES.md`](docs/BUILT_IN_USE_CASES.md).
 
 ## DESFire Quick Check
 
-A real read-only DESFire Quick Check path is now implemented separately from project execution.
+A real read-only DESFire Quick Check path is implemented separately from project execution.
 
 When a DESFire/ISO-DEP tag is presented, the app keeps one NFC session open and queries through liblogicalaccess:
 
@@ -65,9 +79,9 @@ When a DESFire/ISO-DEP tag is presented, the app keeps one NFC session open and 
 - file IDs;
 - file type, size, communication mode and access rights.
 
-Public metadata is always attempted first. If an application or file metadata requires authentication, configured AID-specific keys are tried before global defaults. AID-specific keys can be added from the Android UI; they are currently session-only and are never shown again as plaintext after entry.
+Public metadata is always attempted first. If application/file metadata requires authentication, configured AID-specific keys are tried before global defaults. AID-specific keys can be added from the Android UI; they are currently session-only and are never shown again as plaintext after entry.
 
-The report distinguishes `PUBLIC`, `AUTHENTICATED`, `KEY_REQUIRED`, `DENIED` and `UNAVAILABLE` access states. See [`docs/DESFIRE_QUICK_CHECK.md`](docs/DESFIRE_QUICK_CHECK.md).
+The report distinguishes `PUBLIC`, `AUTHENTICATED`, `KEY_REQUIRED`, `DENIED` and `UNAVAILABLE` access states. The latest result can be exported as a PDF using Android's system document picker. The export model contains no raw DESFire key bytes. See [`docs/DESFIRE_QUICK_CHECK.md`](docs/DESFIRE_QUICK_CHECK.md) and [`docs/REPORTING.md`](docs/REPORTING.md).
 
 The native Quick Check backend deliberately maps no create/write/delete/format/change commands. Unsupported/destructive `CardCommand`s are rejected before a native operation is attempted.
 
@@ -84,7 +98,9 @@ Implemented:
 - `ISO7816ReaderCardAdapter` and `DESFireISO7816ResultChecker`;
 - `DESFireEV1Chip` / `DESFireEV1ISO7816Commands`;
 - typed Kotlin `NativeDesfireCardBackend`;
-- read-only Quick Check execution and report UI.
+- read-only Quick Check execution and report UI;
+- Quick Check PDF export;
+- read-only DESFire Format preflight UI.
 
 The code uses the public liblogicalaccess core rather than the older application-specific `liblogicalaccess-android` package bindings.
 
@@ -130,12 +146,14 @@ build-and-deploy.bat -SkipDeploy
 build-and-deploy.bat -SkipLaunch
 ```
 
-## Current verification boundary
+## CI and verification boundary
 
-The project parser/runtime and Quick Check orchestration have unit-test coverage. The JNI/liblogicalaccess Android path is implemented in source, but the first Windows Conan/CMake build and physical DESFire-card run still need to be performed on the target build machine. Compiler/linker/runtime issues from that first run should be treated as the next integration feedback, not as proof that the native path is already production-ready.
+GitHub Actions runs the hardware-independent JVM tests for project parsing, execution semantics, built-in use cases and Quick Check reporting.
+
+The JNI/liblogicalaccess Android path is implemented in source, but the first Windows Conan/CMake build and physical DESFire-card run still need to be performed on the target build machine. Compiler/linker/runtime issues from that first run should be treated as the next integration feedback, not as proof that the native path is already production-ready.
 
 ## Security
 
-This is an encoding tool, so project files and keys are security-sensitive inputs. The runtime treats project XML as untrusted, limits ZIP/XML sizes, disables external XML entities, avoids logging secret fields and keeps card keys out of report text.
+This is an encoding tool, so project files and keys are security-sensitive inputs. The runtime treats project XML as untrusted, limits ZIP/XML sizes, disables external XML entities, avoids logging secret fields and keeps card keys out of report text/PDF models.
 
 Quick Check keys are currently session-only. Persistent key storage, if added later, must use Android Keystore-backed encryption; raw DESFire keys must not be stored as plaintext preferences or hard-coded into the APK.

@@ -233,8 +233,9 @@ class NativeDesfireCardBackend(
     }
 
     private fun <T : CardResponse> CardResult<ByteArray>.mapSuccess(transform: (ByteArray) -> T): CardResult<CardResponse> {
-        if (!isSuccess || value == null) return CardResult.fail(error, message)
-        return runCatching { CardResult.ok<CardResponse>(transform(value)) }
+        if (!isSuccess) return CardResult.fail(error, message)
+        val payload = value ?: return CardResult.fail(CardError.UNKNOWN, "Native DESFire call returned no payload.")
+        return runCatching { CardResult.ok<CardResponse>(transform(payload)) }
             .getOrElse { CardResult.fail(CardError.PROTOCOL_CONSTRAINT, it.message ?: "Invalid native DESFire response.") }
     }
 
