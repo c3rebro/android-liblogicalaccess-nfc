@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
 
 class DesfireFactoryResetUseCaseTest {
     private val uid = byteArrayOf(0x04, 0x11, 0x22, 0x33)
-    private val currentKey = DesfireKey(ByteArray(16) { 0x5A }, DesfireKeyType.AES, 0)
+    private val currentKey = DesfireKey(ByteArray(16) { 0x5A.toByte() }, DesfireKeyType.AES, 0)
 
     @Test
     fun factoryDefaultPiccKeyIsDesKeyZeroWithSixteenZeroBytes() {
@@ -195,7 +195,7 @@ class DesfireFactoryResetUseCaseTest {
         val apps = initialApps.toMutableList()
         var currentPiccKeyType: DesfireKeyType = DesfireKeyType.AES
             private set
-        var currentPiccKeyBytes: ByteArray = ByteArray(16) { 0x5A }
+        var currentPiccKeyBytes: ByteArray = ByteArray(16) { 0x5A.toByte() }
             private set
         var connectCalls = 0
             private set
