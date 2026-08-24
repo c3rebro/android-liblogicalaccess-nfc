@@ -28,6 +28,8 @@ import de.shansen.rfproject.RfProjectReader
 import de.shansen.rfproject.RfProjectValidator
 import de.shansen.rfproject.RfValidationSeverity
 import de.shansen.rfusecase.BuiltInUseCaseCatalog
+import de.shansen.rfusecase.DesfireFactoryResetPreflight
+import de.shansen.rfusecase.DesfireFactoryResetUseCase
 import de.shansen.rfusecase.DesfireFormatPreflight
 import de.shansen.rfusecase.DesfireFormatUseCase
 import java.time.OffsetDateTime
@@ -36,7 +38,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private enum class ActiveScanUseCase {
         QUICK_CHECK,
-        FORMAT_PREFLIGHT
+        FORMAT_PREFLIGHT,
+        FACTORY_RESET_PREFLIGHT
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -44,9 +47,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private val projectReader = RfProjectReader()
     private val quickCheckService = DesfireQuickCheckService()
     private val formatUseCase = DesfireFormatUseCase()
+    private val factoryResetUseCase = DesfireFactoryResetUseCase()
     private var quickCheckConfig = DesfireQuickCheckConfig()
     private var lastQuickCheckDocument: DesfireQuickCheckReportDocument? = null
     private var lastFormatPreflight: DesfireFormatPreflight? = null
+    private var lastFactoryResetPreflight: DesfireFactoryResetPreflight? = null
     private var activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
 
     private val openProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -85,6 +90,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
         binding.selectFormatUseCase.setOnClickListener {
             selectFormatPreflightUseCase()
+        }
+        binding.selectFactoryResetUseCase.setOnClickListener {
+            selectFactoryResetPreflightUseCase()
         }
         binding.openProject.setOnClickListener {
             openProject.launch(arrayOf("*/*"))
@@ -150,12 +158,22 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             "Format preflight selected. Present the DESFire card to inspect it. No format command will be sent."
     }
 
+    private fun selectFactoryResetPreflightUseCase() {
+        activeScanUseCase = ActiveScanUseCase.FACTORY_RESET_PREFLIGHT
+        lastFactoryResetPreflight = null
+        updateActiveUseCaseSummary()
+        binding.status.text =
+            "Factory Reset preflight selected. Present the DESFire card to inspect it. No format or key-change command will be sent."
+    }
+
     private fun updateActiveUseCaseSummary() {
         binding.activeUseCaseSummary.text = when (activeScanUseCase) {
             ActiveScanUseCase.QUICK_CHECK ->
                 "Active use case: ${BuiltInUseCaseCatalog.desfireQuickCheck.title} [READ ONLY]"
             ActiveScanUseCase.FORMAT_PREFLIGHT ->
                 "Active use case: ${BuiltInUseCaseCatalog.desfireFormat.title} [DESTRUCTIVE] - preflight only"
+            ActiveScanUseCase.FACTORY_RESET_PREFLIGHT ->
+                "Active use case: ${BuiltInUseCaseCatalog.desfireFactoryReset.title} [DESTRUCTIVE] - preflight only"
         }
     }
 
@@ -347,12 +365,17 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             val transport = AndroidIsoDepTransport(isoDep)
             NativeBridge.attachTransport(transport)
 
-            if (activeScanUseCase == ActiveScanUseCase.FORMAT_PREFLIGHT) {
-                runFormatPreflight(tag, uidText)
-                return
+            when (activeScanUseCase) {
+                ActiveScanUseCase.FORMAT_PREFLIGHT -> {
+                    runFormatPreflight(tag, uidText)
+                    return
+                }
+                ActiveScanUseCase.FACTORY_RESET_PREFLIGHT -> {
+                    runFactoryResetPreflight(tag, uidText)
+                    return
+                }
+                ActiveScanUseCase.QUICK_CHECK -> runQuickCheck(tag, isoDep, techList)
             }
-
-            runQuickCheck(tag, isoDep, techList)
         } catch (e: Exception) {
             runOnUiThread {
                 binding.status.text = "NFC/use-case error: ${e.message}"
@@ -410,8 +433,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val result = formatUseCase.preflight(NativeDesfireCardBackend(tag.id))
 
         runOnUiThread {
-            // A destructive use case must never stay armed after one scan. A future execution
-            // stage will require a fresh explicit confirmation after this preflight.
             activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
             updateActiveUseCaseSummary()
 
@@ -435,25 +456,44 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
+    private fun runFactoryResetPreflight(tag: Tag, uidText: String) {
+        runOnUiThread {
+            binding.status.text = "DESFire Factory Reset preflight running (read only)... keep the card in the NFC field."
+        }
+
+        val result = factoryResetUseCase.preflight(NativeDesfireCardBackend(tag.id))
+
+        runOnUiThread {
+            activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+            updateActiveUseCaseSummary()
+
+            if (!result.isSuccess) {
+                binding.status.text = "Factory Reset preflight failed: ${result.message ?: result.error.rfidGearName}"
+                binding.details.text = "UID: $uidText\nNo format or key-change command was sent."
+                return@runOnUiThread
+            }
+
+            val preflight = result.value
+            if (preflight == null) {
+                binding.status.text = "Factory Reset preflight failed: backend returned no preflight result."
+                binding.details.text = "UID: $uidText\nNo format or key-change command was sent."
+                return@runOnUiThread
+            }
+
+            lastFactoryResetPreflight = preflight
+            binding.status.text = "Factory Reset preflight complete (read only). No card data was changed."
+            binding.details.text = formatFactoryResetPreflight(preflight)
+            showFactoryResetPreflightDialog(preflight)
+        }
+    }
+
     private fun formatFormatPreflight(preflight: DesfireFormatPreflight): String = buildString {
         appendLine("DESFire Format Preflight (READ ONLY)")
         appendLine("UID: ${preflight.identity.uid.toHex()}")
         val version = preflight.version
         appendLine("Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, SW ${version.softwareMajor}.${version.softwareMinor}")
 
-        val applicationIds = preflight.visibleApplicationIds
-        when {
-            applicationIds == null ->
-                appendLine("Applications: protected/unavailable during public preflight")
-            applicationIds.isEmpty() ->
-                appendLine("Applications: none visible")
-            else -> {
-                appendLine("Applications: ${applicationIds.size}")
-                applicationIds.sorted().forEach { aid ->
-                    appendLine("  - AID 0x%06X".format(aid))
-                }
-            }
-        }
+        appendApplicationSummary(preflight.visibleApplicationIds)
 
         if (preflight.warnings.isNotEmpty()) {
             appendLine("Warnings:")
@@ -466,6 +506,45 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         appendLine("FORMAT_PICC execution is not enabled in the Android native backend yet.")
     }.trimEnd()
 
+    private fun formatFactoryResetPreflight(preflight: DesfireFactoryResetPreflight): String = buildString {
+        appendLine("DESFire Factory Reset Preflight (READ ONLY)")
+        appendLine("UID: ${preflight.identity.uid.toHex()}")
+        val version = preflight.version
+        appendLine("Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, SW ${version.softwareMajor}.${version.softwareMinor}")
+
+        appendApplicationSummary(preflight.visibleApplicationIds)
+
+        if (preflight.warnings.isNotEmpty()) {
+            appendLine("Warnings:")
+            preflight.warnings.forEach { appendLine("  - $it") }
+        }
+        appendLine()
+        appendLine("Factory Reset target:")
+        appendLine("  - FORMAT_PICC removes all applications/files")
+        appendLine("  - PICC master key #0 -> DES / 16 zero bytes (32 hex zeros) / version 0")
+        appendLine("  - PICC key-settings bits are not changed by this use case")
+        appendLine()
+        appendLine("Confirmation phrase for a future Factory Reset step:")
+        appendLine(preflight.confirmationPhrase)
+        appendLine()
+        appendLine("Destructive Factory Reset execution is not enabled in the Android native backend yet.")
+    }.trimEnd()
+
+    private fun StringBuilder.appendApplicationSummary(applicationIds: List<Int>?) {
+        when {
+            applicationIds == null ->
+                appendLine("Applications: protected/unavailable during public preflight")
+            applicationIds.isEmpty() ->
+                appendLine("Applications: none visible")
+            else -> {
+                appendLine("Applications: ${applicationIds.size}")
+                applicationIds.sorted().forEach { aid ->
+                    appendLine("  - AID 0x%06X".format(aid))
+                }
+            }
+        }
+    }
+
     private fun showFormatPreflightDialog(preflight: DesfireFormatPreflight) {
         if (isFinishing) return
         AlertDialog.Builder(this)
@@ -474,6 +553,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 "Read-only preflight completed for UID ${preflight.identity.uid.toHex()}.\n\n" +
                     "Future destructive confirmation phrase:\n${preflight.confirmationPhrase}\n\n" +
                     "The native FORMAT_PICC execution path is intentionally not enabled yet. No card data was changed."
+            )
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun showFactoryResetPreflightDialog(preflight: DesfireFactoryResetPreflight) {
+        if (isFinishing) return
+        AlertDialog.Builder(this)
+            .setTitle("DESFire Factory Reset preflight")
+            .setMessage(
+                "Read-only preflight completed for UID ${preflight.identity.uid.toHex()}.\n\n" +
+                    "Factory Reset will eventually format the PICC and restore master key #0 to DES with 16 zero bytes (32 hex zeros).\n\n" +
+                    "Future destructive confirmation phrase:\n${preflight.confirmationPhrase}\n\n" +
+                    "The destructive native execution path is intentionally not enabled yet. No card data was changed."
             )
             .setPositiveButton("OK", null)
             .show()

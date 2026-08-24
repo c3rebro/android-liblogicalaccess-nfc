@@ -5,6 +5,7 @@ import de.shansen.rfcard.DesfireAuthenticate
 import de.shansen.rfcard.DesfireChangeFileSettings
 import de.shansen.rfcard.DesfireChangeKey
 import de.shansen.rfcard.DesfireChangeKeySettings
+import de.shansen.rfcard.DesfireChangePiccMasterKey
 import de.shansen.rfcard.DesfireCreateApplication
 import de.shansen.rfcard.DesfireCreateFile
 import de.shansen.rfcard.DesfireDeleteApplication
@@ -142,10 +143,11 @@ object RfidGearActionSafetyPolicy {
         is DesfireChangeFileSettings,
         is DesfireChangeKey,
         is DesfireChangeKeySettings,
+        is DesfireChangePiccMasterKey,
         is DesfireWriteData -> RfidGearActionSafety(
             kind = RfidGearActionSafetyKind.MUTATING,
             operationLabel = command.javaClass.simpleName,
-            reason = "would modify card data; encoder execution is not enabled yet"
+            reason = "would modify card data or security state; encoder execution is not enabled yet"
         )
 
         is DesfireDeleteApplication,

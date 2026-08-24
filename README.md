@@ -2,7 +2,7 @@
 
 Android DESFire/RFID runtime that can execute both RFIDGear project workflows and fixed built-in card use cases.
 
-RFIDGear remains the authoring tool for `.rfPrj` workflows, while Android acts as the portable runtime/encoder. Built-in tools such as DESFire Quick Check and DESFire Format do not require a project file.
+RFIDGear remains the authoring tool for `.rfPrj` workflows, while Android acts as the portable runtime/encoder. Built-in tools such as DESFire Quick Check, DESFire Format and DESFire Factory Reset do not require a project file.
 
 ## Target architecture
 
@@ -63,6 +63,7 @@ Currently modelled:
 
 - **DESFire Quick Check** - read-only inspection of applications, files, communication modes and access rights.
 - **DESFire Format** - destructive workflow with a read-only preflight, UID-bound confirmation and explicit no-auto-retry semantics. Native `FORMAT_PICC` execution is intentionally not enabled yet.
+- **DESFire Factory Reset** - destructive workflow that formats the PICC and then restores PICC master key #0 to DES with 16 zero bytes (`32` hexadecimal zeros), key version `0`. The full core state machine is modelled, while Android currently exposes only the read-only preflight.
 
 See [`docs/BUILT_IN_USE_CASES.md`](docs/BUILT_IN_USE_CASES.md).
 
@@ -100,7 +101,8 @@ Implemented:
 - typed Kotlin `NativeDesfireCardBackend`;
 - read-only Quick Check execution and report UI;
 - Quick Check PDF export;
-- read-only DESFire Format preflight UI.
+- read-only DESFire Format preflight UI;
+- read-only DESFire Factory Reset preflight UI.
 
 The code uses the public liblogicalaccess core rather than the older application-specific `liblogicalaccess-android` package bindings.
 
@@ -148,7 +150,7 @@ build-and-deploy.bat -SkipLaunch
 
 ## CI and verification boundary
 
-GitHub Actions runs the hardware-independent JVM tests for project parsing, execution semantics, built-in use cases and Quick Check reporting.
+GitHub Actions runs the hardware-independent JVM tests for project parsing, execution semantics, built-in use cases and Quick Check reporting, plus Android Kotlin/UI compilation.
 
 The JNI/liblogicalaccess Android path is implemented in source, but the first Windows Conan/CMake build and physical DESFire-card run still need to be performed on the target build machine. Compiler/linker/runtime issues from that first run should be treated as the next integration feedback, not as proof that the native path is already production-ready.
 
@@ -157,3 +159,5 @@ The JNI/liblogicalaccess Android path is implemented in source, but the first Wi
 This is an encoding tool, so project files and keys are security-sensitive inputs. The runtime treats project XML as untrusted, limits ZIP/XML sizes, disables external XML entities, avoids logging secret fields and keeps card keys out of report text/PDF models.
 
 Quick Check keys are currently session-only. Persistent key storage, if added later, must use Android Keystore-backed encryption; raw DESFire keys must not be stored as plaintext preferences or hard-coded into the APK.
+
+The DESFire factory default zero key is a public protocol default rather than a secret and is generated as fresh in-memory key material when needed; caller-provided current PICC keys remain secret and must never be logged or persisted in plaintext.
