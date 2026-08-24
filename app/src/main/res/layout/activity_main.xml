@@ -30,6 +30,13 @@
             android:layout_marginTop="8dp"
             android:text="Prepare DESFire format (destructive)" />
 
+        <Button
+            android:id="@+id/selectFactoryResetUseCase"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Prepare DESFire factory reset (destructive)" />
+
         <TextView
             android:id="@+id/activeUseCaseSummary"
             android:layout_width="match_parent"
