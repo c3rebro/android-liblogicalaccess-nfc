@@ -28,5 +28,16 @@ object BuiltInUseCaseCatalog {
         risk = BuiltInUseCaseRisk.DESTRUCTIVE
     )
 
-    val all: List<BuiltInUseCaseDescriptor> = listOf(desfireQuickCheck, desfireFormat)
+    val desfireFactoryReset = BuiltInUseCaseDescriptor(
+        id = "desfire-factory-reset",
+        title = "Factory Reset DESFire card",
+        description = "Format the DESFire PICC and restore PICC master key #0 to the factory DES zero key (16 zero bytes / 32 hex zeros).",
+        risk = BuiltInUseCaseRisk.DESTRUCTIVE
+    )
+
+    val all: List<BuiltInUseCaseDescriptor> = listOf(
+        desfireQuickCheck,
+        desfireFormat,
+        desfireFactoryReset
+    )
 }
