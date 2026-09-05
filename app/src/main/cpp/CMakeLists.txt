@@ -11,6 +11,11 @@ if(NOT EXISTS "${LLA_CONAN_DIR}")
         "Run build-and-deploy.bat to prepare the Android native dependencies.")
 endif()
 
+# Android NDK toolchain sets CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY, which
+# blocks CMAKE_PREFIX_PATH from being searched outside the sysroot.  BOTH
+# keeps the NDK sysroot search while also honoring CMAKE_PREFIX_PATH for our
+# Conan packages.  This applies to transitive find_dependency() calls too.
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 list(PREPEND CMAKE_PREFIX_PATH "${LLA_CONAN_DIR}")
 find_package(logicalaccess CONFIG REQUIRED)
 
@@ -26,5 +31,6 @@ target_link_libraries(
     lla_android_bridge
     PRIVATE
     logicalaccess::logicalaccess
+    Boost::boost
     log
 )

@@ -1,0 +1,235 @@
+name: Native build — debug APK
+
+# Runs the full Conan/NDK/Gradle pipeline on Linux (ubuntu-latest), which has
+# none of the Windows toolchain constraints (no cmd.exe limits, no .cmd wrappers,
+# no MSYS2 path-length issues).  Produces app-debug.apk as a downloadable
+# artifact.
+#
+# First-run build time: ~60–90 min (boost ~30 min, openssl ~20 min, lla ~15 min).
+# Cached runs (Conan package store restored): ~10–15 min.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      LLA_VERSION:   '3.7.0'
+      NDK_VERSION:   '27.0.12077973'
+      CMAKE_VERSION: '3.22.1'
+      CONAN_VERSION: '2.31.1'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── Java / Gradle ────────────────────────────────────────────────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.11.1'
+
+      # ── Android NDK ──────────────────────────────────────────────────────────
+      - name: Install NDK ${{ env.NDK_VERSION }} and CMake ${{ env.CMAKE_VERSION }}
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
+
+      # ── Conan ────────────────────────────────────────────────────────────────
+      - name: Install Conan ${{ env.CONAN_VERSION }}
+        run: pip install --quiet "conan==$CONAN_VERSION"
+
+      # Cache keyed on conanfile + workflow file so it invalidates when either
+      # the dependency list or build settings (NDK/LLA version) change.
+      - name: Restore Conan package store
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2/p
+          key: conan-android-arm64-${{ runner.os }}-ndk${{ env.NDK_VERSION }}-lla${{ env.LLA_VERSION }}-${{ hashFiles('native/conanfile.txt', '.github/workflows/native-build.yml') }}
+          restore-keys: |
+            conan-android-arm64-${{ runner.os }}-ndk${{ env.NDK_VERSION }}-lla${{ env.LLA_VERSION }}-
+
+      # ── liblogicalaccess source ──────────────────────────────────────────────
+      - name: Clone liblogicalaccess ${{ env.LLA_VERSION }}
+        run: |
+          git clone --depth 1 --branch "$LLA_VERSION" \
+            https://github.com/liblogicalaccess/liblogicalaccess.git \
+            ".tools/liblogicalaccess-$LLA_VERSION"
+
+      # ── Conan host profile ───────────────────────────────────────────────────
+      - name: Generate Conan Android arm64 profile
+        run: |
+          NDK="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          CLANG_MAJOR=$("$BIN/clang++" --version | grep -oP 'clang version \K[0-9]+')
+
+          conan profile detect --force
+
+          mkdir -p .tools
+          # On Linux the NDK ships real ELF/shell-script compiler wrappers, not
+          # .cmd files, so no response-file workarounds are needed here.
+          cat > .tools/conan-android-arm64.profile << EOF
+          include(default)
+
+          [settings]
+          os=Android
+          os.api_level=26
+          arch=armv8
+          compiler=clang
+          compiler.version=${CLANG_MAJOR}
+          compiler.libcxx=c++_shared
+          compiler.cppstd=17
+          build_type=Release
+
+          [conf]
+          tools.android:ndk_path=${NDK}
+          tools.cmake.cmaketoolchain:generator=Ninja
+          tools.build:compiler_executables={"c": "${BIN}/aarch64-linux-android26-clang", "cpp": "${BIN}/aarch64-linux-android26-clang++", "ar": "${BIN}/llvm-ar", "ranlib": "${BIN}/llvm-ranlib"}
+          tools.build:cflags=["--target=aarch64-linux-android26"]
+          tools.build:cxxflags=["--target=aarch64-linux-android26"]
+          tools.build:sharedlinkflags=["--target=aarch64-linux-android26"]
+          tools.build:sysroot=${SYSROOT}
+          tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
+          EOF
+
+          echo "Conan profile:"
+          cat .tools/conan-android-arm64.profile
+
+      # ── Conan build ──────────────────────────────────────────────────────────
+      # The --without-* options mirror the Windows script exactly:
+      #   without_stacktrace   addr2line not resolvable in Android cross-compile
+      #   without_locale       libiconv pulls in autotools issues on Android
+      #   without_iostreams    bzip2 same
+      #   the rest             not needed by liblogicalaccess; cuts build time
+      - name: Build liblogicalaccess ${{ env.LLA_VERSION }} for Android arm64
+        run: |
+          conan create ".tools/liblogicalaccess-$LLA_VERSION" \
+            -pr:h .tools/conan-android-arm64.profile \
+            -pr:b default \
+            -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_PKCS=False" \
+            -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_LIBUSB=False" \
+            -o:h boost/*:without_stacktrace=True \
+            -o:h boost/*:without_locale=True \
+            -o:h boost/*:without_iostreams=True \
+            -o:h boost/*:without_charconv=True \
+            -o:h boost/*:without_cobalt=True \
+            -o:h boost/*:without_context=True \
+            -o:h boost/*:without_contract=True \
+            -o:h boost/*:without_coroutine=True \
+            -o:h boost/*:without_fiber=True \
+            -o:h boost/*:without_graph=True \
+            -o:h boost/*:without_graph_parallel=True \
+            -o:h boost/*:without_json=True \
+            -o:h boost/*:without_log=True \
+            -o:h boost/*:without_math=True \
+            -o:h boost/*:without_mpi=True \
+            -o:h boost/*:without_nowide=True \
+            -o:h boost/*:without_process=True \
+            -o:h boost/*:without_program_options=True \
+            -o:h boost/*:without_python=True \
+            -o:h boost/*:without_random=True \
+            -o:h boost/*:without_serialization=True \
+            -o:h boost/*:without_test=True \
+            -o:h boost/*:without_timer=True \
+            -o:h boost/*:without_type_erasure=True \
+            -o:h boost/*:without_url=True \
+            -o:h boost/*:without_wave=True \
+            --build=missing \
+            --test-folder=
+
+      # ── Conan install + deploy ────────────────────────────────────────────────
+      - name: Install and deploy Conan packages
+        run: |
+          mkdir -p .tools/conan/android-arm64 .tools/conan-deploy/android-arm64
+          conan install native/ \
+            -of .tools/conan/android-arm64 \
+            -pr:h .tools/conan-android-arm64.profile \
+            -pr:b default \
+            -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_PKCS=False" \
+            -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_LIBUSB=False" \
+            -o:h boost/*:without_stacktrace=True \
+            -o:h boost/*:without_locale=True \
+            -o:h boost/*:without_iostreams=True \
+            -o:h boost/*:without_charconv=True \
+            -o:h boost/*:without_cobalt=True \
+            -o:h boost/*:without_context=True \
+            -o:h boost/*:without_contract=True \
+            -o:h boost/*:without_coroutine=True \
+            -o:h boost/*:without_fiber=True \
+            -o:h boost/*:without_graph=True \
+            -o:h boost/*:without_graph_parallel=True \
+            -o:h boost/*:without_json=True \
+            -o:h boost/*:without_log=True \
+            -o:h boost/*:without_math=True \
+            -o:h boost/*:without_mpi=True \
+            -o:h boost/*:without_nowide=True \
+            -o:h boost/*:without_process=True \
+            -o:h boost/*:without_program_options=True \
+            -o:h boost/*:without_python=True \
+            -o:h boost/*:without_random=True \
+            -o:h boost/*:without_serialization=True \
+            -o:h boost/*:without_test=True \
+            -o:h boost/*:without_timer=True \
+            -o:h boost/*:without_type_erasure=True \
+            -o:h boost/*:without_url=True \
+            -o:h boost/*:without_wave=True \
+            --build=missing \
+            --deployer=full_deploy \
+            --deployer-folder .tools/conan-deploy/android-arm64 \
+            -c:h tools.deployer:symlinks=False
+
+      # ── Stage native libraries for JNI ───────────────────────────────────────
+      - name: Stage .so files and fix CMakeDeps output path
+        run: |
+          mkdir -p .tools/jniLibs/arm64-v8a
+
+          # Copy all host shared libraries (the 'host' subtree contains Android-
+          # target libraries; 'build' contains Linux build-machine libraries).
+          find .tools/conan-deploy/android-arm64/full_deploy/host \
+            \( -name '*.so' -o -name '*.so.*' \) \
+            -exec cp {} .tools/jniLibs/arm64-v8a/ \;
+
+          SO_COUNT=$(ls .tools/jniLibs/arm64-v8a/*.so* 2>/dev/null | wc -l)
+          echo "Staged $SO_COUNT shared libraries"
+          [ "$SO_COUNT" -gt 0 ] || { echo "No .so files found — deploy failed"; exit 1; }
+
+          # CMakeDeps may place config files in a sub-directory; flatten so that
+          # CMake can find logicalaccess-config.cmake directly in the output dir.
+          CONFIG=$(find .tools/conan/android-arm64 -name 'logicalaccess-config.cmake' | head -1)
+          [ -z "$CONFIG" ] && { echo "logicalaccess-config.cmake not found"; exit 1; }
+          CONFIG_DIR=$(dirname "$CONFIG")
+          if [ "$CONFIG_DIR" != ".tools/conan/android-arm64" ]; then
+            cp "$CONFIG_DIR"/*.cmake .tools/conan/android-arm64/
+          fi
+
+      # ── Gradle ───────────────────────────────────────────────────────────────
+      - name: Run JVM tests and assemble debug APK
+        run: gradle --no-daemon test :app:assembleDebug
+
+      # ── Artifact ─────────────────────────────────────────────────────────────
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

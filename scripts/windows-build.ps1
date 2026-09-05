@@ -37,39 +37,67 @@ function Get-JavaMajor([string]$JavaExe) {
 }
 
 function Find-JavaHome {
+    # PROGRAMW6432 is always the native 64-bit Program Files, even in a WOW64 process.
+    $pf = if ($env:PROGRAMW6432) { $env:PROGRAMW6432 } else { $env:ProgramFiles }
+
     $homes = @()
     if ($env:JAVA_HOME) { $homes += $env:JAVA_HOME }
-    $homes += (Join-Path $env:ProgramFiles 'Android\Android Studio\jbr')
-    $homes += (Join-Path $env:ProgramFiles 'Android\Android Studio\jre')
+    $homes += (Join-Path $pf 'Android\Android Studio\jbr')
+    $homes += (Join-Path $pf 'Android\Android Studio\jre')
 
-    $adoptium = Join-Path $env:ProgramFiles 'Eclipse Adoptium'
+    $adoptium = Join-Path $pf 'Eclipse Adoptium'
     if (Test-Path $adoptium) {
         $homes += @(Get-ChildItem $adoptium -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | ForEach-Object FullName)
     }
 
-    foreach ($home in ($homes | Where-Object { $_ } | Select-Object -Unique)) {
-        $java = Join-Path $home 'bin\java.exe'
-        if ((Test-Path $java) -and ((Get-JavaMajor $java) -ge 17)) { return $home }
+    # Registry fallback using an explicit 64-bit view so it works in both 32-bit and
+    # 64-bit PowerShell, and covers cases where Get-ChildItem silently fails on
+    # installer-restricted Program Files subdirectories.
+    try {
+        $reg = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64)
+        $jdkKey = $reg.OpenSubKey('SOFTWARE\JavaSoft\JDK')
+        if ($jdkKey) {
+            foreach ($subName in $jdkKey.GetSubKeyNames()) {
+                try {
+                    if ([int]($subName -split '[.\-]')[0] -ge 17) {
+                        $sub = $jdkKey.OpenSubKey($subName)
+                        $p = $sub.GetValue('JavaHome')
+                        if ($p -and (Test-Path $p)) { $homes += $p }
+                        $sub.Close()
+                    }
+                } catch {}
+            }
+            $jdkKey.Close()
+        }
+        $reg.Close()
+    } catch {}
+
+    foreach ($javaHome in ($homes | Where-Object { $_ } | Select-Object -Unique)) {
+        $java = Join-Path $javaHome 'bin\java.exe'
+        if ((Test-Path $java) -and ((Get-JavaMajor $java) -ge 17)) { return $javaHome }
     }
     return $null
 }
 
 function Ensure-Java {
-    $home = Find-JavaHome
-    if (-not $home) {
+    $javaHome = Find-JavaHome
+    if (-not $javaHome) {
         $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
         if (-not $winget) { Fail 'JDK 17 not found. Install JDK 17 or Android Studio with its bundled JBR.' }
         Step 'Installing JDK 17 via winget'
         Write-Host 'Review any package/source license prompts shown by winget.' -ForegroundColor Yellow
         & $winget.Source install --id EclipseAdoptium.Temurin.17.JDK -e
-        if ($LASTEXITCODE -ne 0) { Fail 'JDK 17 installation failed.' }
-        $home = Find-JavaHome
+        # winget returns non-zero when already installed or when UAC elevation causes a deferred install;
+        # rely on Find-JavaHome to confirm rather than the exit code.
+        $javaHome = Find-JavaHome
     }
-    if (-not $home) { Fail 'JDK 17 could not be located after installation.' }
-    $env:JAVA_HOME = $home
-    $env:Path = "$(Join-Path $home 'bin');$env:Path"
-    Write-Host "JAVA_HOME=$home"
+    if (-not $javaHome) { Fail 'JDK 17 could not be located. Install JDK 17 or Android Studio with its bundled JBR.' }
+    $env:JAVA_HOME = $javaHome
+    $env:Path = "$(Join-Path $javaHome 'bin');$env:Path"
+    Write-Host "JAVA_HOME=$javaHome"
 }
 
 function Get-SdkRoot {
@@ -161,7 +189,7 @@ function Ensure-Git {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if (-not $winget) { Fail 'Git is required to fetch liblogicalaccess 3.7.0.' }
     Step 'Installing Git via winget'
-    & $winget.Source install --id Git.Git -e
+    & $winget.Source install --id Git.Git -e | Out-Host
     if ($LASTEXITCODE -ne 0) { Fail 'Git installation failed.' }
     $git = Find-Git
     if (-not $git) { Fail 'Git could not be located after installation.' }
@@ -204,7 +232,7 @@ function Ensure-Python {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if (-not $winget) { Fail 'Python 3 is required for the project-local Conan environment.' }
     Step 'Installing Python 3.12 via winget'
-    & $winget.Source install --id Python.Python.3.12 -e
+    & $winget.Source install --id Python.Python.3.12 -e | Out-Host
     if ($LASTEXITCODE -ne 0) { Fail 'Python installation failed.' }
     $python = Find-Python
     if (-not $python) { Fail 'Python could not be located after installation.' }
@@ -219,7 +247,7 @@ function Ensure-Conan([string]$Python) {
     if (-not (Test-Path $venvPython)) {
         Step 'Creating project-local Python environment for Conan'
         New-Item -ItemType Directory -Force (Split-Path -Parent $venv) | Out-Null
-        & $Python -m venv $venv
+        & $Python -m venv $venv | Out-Host
         if ($LASTEXITCODE -ne 0) { Fail 'Unable to create Conan Python virtual environment.' }
     }
 
@@ -233,7 +261,7 @@ function Ensure-Conan([string]$Python) {
 
     if ($installedVersion -ne $ConanVersion) {
         Step "Installing Conan $ConanVersion into project-local environment"
-        & $venvPython -m pip install --disable-pip-version-check --upgrade "conan==$ConanVersion"
+        & $venvPython -m pip install --disable-pip-version-check --upgrade "conan==$ConanVersion" | Out-Host
         if ($LASTEXITCODE -ne 0) { Fail 'Conan installation failed.' }
     }
 
@@ -260,14 +288,115 @@ function Prepare-LibLogicalAccess([string]$Sdk, [string]$Git, [string]$Conan) {
     $env:Path = "$cmakeBin;$env:Path"
 
     Step "Preparing liblogicalaccess $LlaVersion for Android arm64"
-    & $Conan profile detect --force
-    if ($LASTEXITCODE -ne 0) { Fail 'Conan build profile detection failed.' }
+    $conanHomeDir = if ($env:CONAN_HOME) { $env:CONAN_HOME } else { Join-Path $env:USERPROFILE '.conan2' }
+    $defaultProfile = Join-Path $conanHomeDir 'profiles\default'
+    if (-not (Test-Path $defaultProfile)) {
+        Step 'Generating Conan default host profile (one-time setup)'
+        & $Conan profile detect
+        if ($LASTEXITCODE -ne 0) { Fail 'Conan build profile detection failed.' }
+    }
 
     $tools = Join-Path $Root '.tools'
     New-Item -ItemType Directory -Force $tools | Out-Null
 
     $profile = Join-Path $tools 'conan-android-arm64.profile'
     $ndkForConan = $ndk.Replace('\', '/')
+    $ndkBin     = "$ndkForConan/toolchains/llvm/prebuilt/windows-x86_64/bin"
+    $ndkSysroot = "$ndkForConan/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+    $apiTarget  = "aarch64-linux-android26"
+
+    # Create bash wrapper scripts for the NDK clang compiler/linker.
+    #
+    # Problem: OpenSSL links ~1000 .o files; the command line is ~40,000 chars —
+    # over both Windows limits (cmd.exe: 8191, CreateProcess: 32767).  The Conan
+    # OpenSSL recipe uses AutotoolsToolchain which hardcodes CC/CXX to the .cmd
+    # wrappers in conanautotoolstoolchain.sh; those .cmd files must go through
+    # cmd.exe and cannot handle the long link command.
+    #
+    # Fix: A Conan pre_build hook patches conanautotoolstoolchain.sh (written by
+    # generate(), read by build()) to replace the .cmd paths with these bash
+    # wrappers.  MSYS2 make exec()s the bash script via POSIX IPC (no Windows
+    # length limit), and the script moves .o input files to a @response_file so
+    # the final clang.exe call stays within 32767 chars.
+    $wrapperDir = Join-Path $tools 'ndk-clang-wrappers'
+    New-Item -ItemType Directory -Force $wrapperDir | Out-Null
+
+    $wrapperBody = @'
+#!/bin/bash
+REAL="__REAL__"
+CMDLEN=0; for a in "$@"; do CMDLEN=$((CMDLEN + ${#a} + 1)); done
+if [[ $CMDLEN -le 25000 ]]; then exec "$REAL" "$@"; fi
+# clang.exe is a Windows binary and needs a Windows path for @response_file.
+# mktemp gives a POSIX path; cygpath -w converts it to a Windows path.
+RSP_POSIX=$(mktemp /tmp/lnk_XXXXXXXX.rsp)
+RSP_WIN=$(cygpath -w "$RSP_POSIX")
+NEWARGS=(); SKIP=false
+for a in "$@"; do
+    if $SKIP; then NEWARGS+=("$a"); SKIP=false
+    elif [[ "$a" == "-o" ]]; then NEWARGS+=("$a"); SKIP=true
+    elif [[ "$a" == *.o ]]; then printf '%s\n' "$a" >> "$RSP_POSIX"
+    else NEWARGS+=("$a")
+    fi
+done
+"$REAL" "${NEWARGS[@]}" "@$RSP_WIN"; STATUS=$?; rm -f "$RSP_POSIX"; exit $STATUS
+'@
+
+    $wrapperCFile   = Join-Path $wrapperDir 'ndk-clang.sh'
+    $wrapperCPPFile = Join-Path $wrapperDir 'ndk-clang++.sh'
+    ($wrapperBody -replace '__REAL__', "$ndkBin/clang.exe")   | Set-Content $wrapperCFile   -Encoding UTF8 -NoNewline
+    ($wrapperBody -replace '__REAL__', "$ndkBin/clang++.exe") | Set-Content $wrapperCPPFile -Encoding UTF8 -NoNewline
+
+    # Helper: Windows path → MSYS2 POSIX path  (C:\foo\bar → /c/foo/bar)
+    function toPosix([string]$p) {
+        $p = $p -replace '\\', '/'
+        if ($p -match '^([A-Za-z]):(.*)') { return '/' + $Matches[1].ToLower() + $Matches[2] }
+        return $p
+    }
+
+    # chmod +x so MSYS2 make can exec the wrappers directly (NTFS files created
+    # by PowerShell don't have the POSIX execute bit set in MSYS2's metadata).
+    $posixC   = toPosix $wrapperCFile
+    $posixCPP = toPosix $wrapperCPPFile
+    $gitRoot  = Split-Path (Split-Path $Git -Parent) -Parent
+    $gitBash  = Join-Path $gitRoot 'bin\bash.exe'
+    if (-not (Test-Path $gitBash)) { $gitBash = Join-Path $gitRoot 'usr\bin\bash.exe' }
+    if (Test-Path $gitBash) {
+        & $gitBash -c "chmod +x '$posixC' '$posixCPP'" 2>&1 | Out-Null
+    }
+
+    # POSIX paths embedded in conanautotoolstoolchain.sh; pass to the hook via env vars.
+    $env:NDK_CLANG_WRAPPER_C   = $posixC
+    $env:NDK_CLANG_WRAPPER_CPP = $posixCPP
+
+    # Install Conan pre_build hook: patches conanautotoolstoolchain.sh for openssl
+    # right before build() runs, replacing .cmd compiler paths with our wrappers.
+    # Conan 2 requires the file name to start with hook_ for auto-discovery.
+    $hooksDir = Join-Path $env:CONAN_HOME 'extensions\hooks'
+    New-Item -ItemType Directory -Force $hooksDir | Out-Null
+    @'
+import os, re
+
+def pre_build(conanfile):
+    if getattr(conanfile, "name", None) != "openssl":
+        return
+    sh = os.path.join(conanfile.build_folder, "conan", "conanautotoolstoolchain.sh")
+    if not os.path.isfile(sh):
+        return
+    wc  = os.environ.get("NDK_CLANG_WRAPPER_C",   "")
+    wpp = os.environ.get("NDK_CLANG_WRAPPER_CPP",  "")
+    if not wc or not wpp:
+        return
+    txt = open(sh).read()
+    txt = re.sub(r'[^"\']*aarch64-linux-android\d+-clang\.cmd',   wc,  txt)
+    txt = re.sub(r'[^"\']*aarch64-linux-android\d+-clang\+\+\.cmd', wpp, txt)
+    open(sh, "w").write(txt)
+'@ | Set-Content (Join-Path $hooksDir 'hook_openssl_clang_wrapper.py') -Encoding UTF8
+
+    # Point the boost b2 build (clang-linux toolset) at the raw NDK .exe binaries.
+    # b2.exe on Windows can invoke .exe files directly; .cmd wrappers cannot be executed
+    # via CreateProcess without going through cmd.exe, which b2 does not do.
+    # The target triple and sysroot are supplied separately via the conf keys so that
+    # b2's user-config.jam includes them in <compileflags> and <linkflags>.
     @"
 include(default)
 
@@ -279,11 +408,17 @@ compiler=clang
 compiler.version=$clangMajor
 compiler.libcxx=c++_shared
 compiler.cppstd=17
-build_type=Debug
+build_type=Release
 
 [conf]
 tools.android:ndk_path=$ndkForConan
 tools.cmake.cmaketoolchain:generator=Ninja
+tools.build:compiler_executables={"c": "$ndkBin/clang.exe", "cpp": "$ndkBin/clang++.exe", "ar": "$ndkBin/llvm-ar.exe", "ranlib": "$ndkBin/llvm-ranlib.exe"}
+tools.build:cflags=["--target=$apiTarget"]
+tools.build:cxxflags=["--target=$apiTarget"]
+tools.build:sharedlinkflags=["--target=$apiTarget"]
+tools.build:sysroot=$ndkSysroot
+tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
 "@ | Set-Content $profile -Encoding ASCII
 
     $source = Join-Path $tools "liblogicalaccess-$LlaVersion"
@@ -301,12 +436,102 @@ tools.cmake.cmaketoolchain:generator=Ninja
         if ($LASTEXITCODE -ne 0) { Fail "Unable to clone liblogicalaccess tag $LlaVersion." }
     }
 
+    # Patch samples/basic out of the build — it links -lpcscreaders which is desktop-only.
+    # BUILD_TESTING=OFF (set via Conan extra_variables) already skips tests; we reuse
+    # the same guard here.  The patch is committed and the tag force-updated so that
+    # conan export's revision_mode='scm' check keeps passing on subsequent runs.
+    $cmakeLists = Join-Path $source 'CMakeLists.txt'
+    $cmakeContent = Get-Content $cmakeLists -Raw
+    if ($cmakeContent -match '(?m)^add_subdirectory\(samples/basic\)') {
+        $patched = $cmakeContent -replace '(?m)^add_subdirectory\(samples/basic\)',
+            "if (NOT BUILD_TESTING STREQUAL OFF)`r`n    add_subdirectory(samples/basic)`r`nendif ()"
+        [System.IO.File]::WriteAllText($cmakeLists, $patched, [System.Text.Encoding]::UTF8)
+        & $Git -C $source add CMakeLists.txt
+        & $Git -C $source -c user.email='build@local' -c user.name='build' `
+            commit -m "Disable samples/basic for Android cross-compile (no PCSC)"
+        & $Git -C $source tag -f $LlaVersion
+        if ($LASTEXITCODE -ne 0) { Fail "Failed to patch liblogicalaccess CMakeLists.txt." }
+    }
+
     # Build only the public Android subset. PKCS/libusb are intentionally disabled;
     # they are not needed for phone NFC Quick Check and would add unrelated dependencies.
+    #
+    # Boost option rationale (Android cross-compilation on Windows):
+    #   without_stacktrace    : boost recipe validates addr2line_location is absolute when
+    #                           os != Windows; addr2line is unresolved in this cross-compile.
+    #   without_locale        : pulls in libiconv/1.17 which builds via autotools and fails
+    #                           because MSYS2 bash cannot execute NDK's .cmd compiler wrappers.
+    #   without_iostreams     : pulls in bzip2/1.0.8, same autotools/.cmd issue.
+    #   The rest below        : liblogicalaccess only needs atomic, chrono, container,
+    #                           date_time, exception, filesystem, regex, system, thread.
+    #                           Disabling everything else cuts the build from 20+ to 9
+    #                           compiled libraries, avoiding several Android-incompatible
+    #                           components (url, wave, fiber/context assembly, log cmake
+    #                           generation quirks, etc.) and keeps the build short enough
+    #                           to fit inside a typical privileged-session window.
+    $boostAndroidOpts = @(
+        '-o:h', 'boost/*:without_stacktrace=True',
+        '-o:h', 'boost/*:without_locale=True',
+        '-o:h', 'boost/*:without_iostreams=True',
+        '-o:h', 'boost/*:without_charconv=True',
+        '-o:h', 'boost/*:without_cobalt=True',
+        '-o:h', 'boost/*:without_context=True',
+        '-o:h', 'boost/*:without_contract=True',
+        '-o:h', 'boost/*:without_coroutine=True',
+        '-o:h', 'boost/*:without_fiber=True',
+        '-o:h', 'boost/*:without_graph=True',
+        '-o:h', 'boost/*:without_graph_parallel=True',
+        '-o:h', 'boost/*:without_json=True',
+        '-o:h', 'boost/*:without_log=True',
+        '-o:h', 'boost/*:without_math=True',
+        '-o:h', 'boost/*:without_mpi=True',
+        '-o:h', 'boost/*:without_nowide=True',
+        '-o:h', 'boost/*:without_process=True',
+        '-o:h', 'boost/*:without_program_options=True',
+        '-o:h', 'boost/*:without_python=True',
+        '-o:h', 'boost/*:without_random=True',
+        '-o:h', 'boost/*:without_serialization=True',
+        '-o:h', 'boost/*:without_test=True',
+        '-o:h', 'boost/*:without_timer=True',
+        '-o:h', 'boost/*:without_type_erasure=True',
+        '-o:h', 'boost/*:without_url=True',
+        '-o:h', 'boost/*:without_wave=True'
+    )
+
+    # The Boost recipe's build() method patches files inside the shared Conan source
+    # cache.  If a previous build ran under a different security context (e.g. via a
+    # privileged-session tool like "Admin By Request"), those cache files are owned by
+    # that elevated account and become read-only to the normal user.  Granting the
+    # current user full control before invoking Conan prevents PermissionError on
+    # the replace_in_file calls, and also ensures files created during this run
+    # remain accessible to the normal user after the elevated session ends.
+    # Use CONAN_HOME if set (short path to avoid command-line length limits), else fall back.
+    $conanHome = if ($env:CONAN_HOME) { $env:CONAN_HOME } else { Join-Path $env:USERPROFILE '.conan2' }
+    if (Test-Path $conanHome) {
+        $grantee = "$env:USERDOMAIN\$env:USERNAME"
+        & icacls $conanHome /grant "${grantee}:(OI)(CI)F" /T /C 2>&1 | Out-Null
+    }
+
+    # Remove any partial/stale boost and openssl binaries from the Conan cache, but only
+    # when a full build is actually needed (i.e. the deployed .so files are not yet present).
+    # This avoids discarding a valid cached package on every run while still clearing the
+    # broken partial state left by a previously-interrupted build.
+    # OpenSSL is cleared alongside boost because it was previously built with build_type=Debug
+    # (which caused '-MDd' unknown-argument failures with the NDK clang).  Now that the
+    # profile uses build_type=Release we must discard the stale Debug package.
+    $deployCheck = Join-Path $tools 'conan-deploy\android-arm64'
+    $boostDeploySoFiles = @(Get-ChildItem $deployCheck -Recurse -Filter 'libboost_system.so' `
+        -ErrorAction SilentlyContinue)
+    if ($boostDeploySoFiles.Count -eq 0) {
+        Step 'Clearing any partial Boost and OpenSSL Conan cache before fresh build'
+        & $Conan remove 'boost/*' --confirm 2>&1 | Out-Null
+        & $Conan remove 'openssl/*' --confirm 2>&1 | Out-Null
+    }
     & $Conan create $source `
         '-pr:h' $profile '-pr:b' default `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_PKCS=False" `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_LIBUSB=False" `
+        @boostAndroidOpts `
         '--build=missing' '--test-folder='
     if ($LASTEXITCODE -ne 0) { Fail 'Conan build of liblogicalaccess for Android failed.' }
 
@@ -322,6 +547,7 @@ tools.cmake.cmaketoolchain:generator=Ninja
         '-pr:h' $profile '-pr:b' default `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_PKCS=False" `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_LIBUSB=False" `
+        @boostAndroidOpts `
         '--build=missing' `
         '--deployer=full_deploy' '--deployer-folder' $deploy `
         '-c:h' 'tools.deployer:symlinks=False'
@@ -354,8 +580,8 @@ tools.cmake.cmaketoolchain:generator=Ninja
 
 function Ensure-Gradle {
     $tools = Join-Path $Root '.tools'
-    $home = Join-Path $tools "gradle-$GradleVersion"
-    $gradle = Join-Path $home 'bin\gradle.bat'
+    $gradleDir = Join-Path $tools "gradle-$GradleVersion"
+    $gradle = Join-Path $gradleDir 'bin\gradle.bat'
     if (Test-Path $gradle) { return $gradle }
 
     Step "Downloading Gradle $GradleVersion"
@@ -379,6 +605,14 @@ try {
 
     $git = Ensure-Git
     $python = Ensure-Python
+
+    # Use a short Conan home path to avoid the Windows command-line length limit
+    # (8191 chars for cmd.exe, 32767 for CreateProcess) when linking OpenSSL's
+    # libcrypto.so.3.  That link command lists hundreds of .o files; with the
+    # default ~/.conan2 path each entry is ~80 chars, which blows the limit.
+    # C:\c2 keeps each entry short enough to fit within the limit.
+    $env:CONAN_HOME = 'C:\c2'
+
     $conan = Ensure-Conan $python
     Prepare-LibLogicalAccess $sdk $git $conan
 

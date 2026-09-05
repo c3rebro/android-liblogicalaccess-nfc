@@ -171,7 +171,7 @@ public:
     std::string getDefaultXmlNodeName() const override { return "AndroidIsoDepDataTransport"; }
 
 protected:
-    void send(const logicalaccess::ByteVector& data) override {
+    void send(const ByteVector& data) override {
         enforce_thread();
 
         jbyteArray request = env_->NewByteArray(static_cast<jsize>(data.size()));
@@ -206,7 +206,7 @@ protected:
         env_->DeleteLocalRef(response);
     }
 
-    logicalaccess::ByteVector receive(long int) override {
+    ByteVector receive(long int) override {
         enforce_thread();
         auto result = std::move(pending_);
         pending_.clear();
@@ -232,11 +232,11 @@ private:
     jmethodID transceive_ = nullptr;
     jmethodID is_connected_ = nullptr;
     std::thread::id owner_thread_;
-    logicalaccess::ByteVector pending_;
+    ByteVector pending_;
 };
 
 struct NativeDesfireSession {
-    NativeDesfireSession(JNIEnv* env, jobject java_transport, const logicalaccess::ByteVector& uid)
+    NativeDesfireSession(JNIEnv* env, jobject java_transport, const ByteVector& uid)
         : owner_thread(std::this_thread::get_id()) {
         transport = std::make_shared<AndroidIsoDepDataTransport>(env, java_transport);
         if (!transport->isConnected()) {
@@ -298,7 +298,7 @@ std::shared_ptr<logicalaccess::DESFireKey> make_key(
         throw std::invalid_argument("DESFire key has an invalid length for its key type.");
     }
 
-    logicalaccess::ByteVector bytes(static_cast<std::size_t>(length));
+    ByteVector bytes(static_cast<std::size_t>(length));
     env->GetByteArrayRegion(key_data, 0, length, reinterpret_cast<jbyte*>(bytes.data()));
 
     auto key = std::make_shared<logicalaccess::DESFireKey>();
@@ -532,7 +532,7 @@ Java_de_shansen_liblogicalaccessnfc_NativeBridge_beginDesfireSession(
             throw std::runtime_error("No Android IsoDep transport is attached.");
         }
 
-        logicalaccess::ByteVector uid;
+        ByteVector uid;
         if (uid_array) {
             const auto length = env->GetArrayLength(uid_array);
             uid.resize(static_cast<std::size_t>(length));

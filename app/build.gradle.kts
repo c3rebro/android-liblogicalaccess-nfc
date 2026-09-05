@@ -22,7 +22,11 @@ android {
                 cppFlags += listOf("-std=c++17")
                 arguments += listOf(
                     "-DLLA_CONAN_DIR=$llaConanDir",
-                    "-DANDROID_STL=c++_shared"
+                    "-DANDROID_STL=c++_shared",
+                    // Conan packages were built as Release; CMakeDeps wraps all include dirs and
+                    // link flags in $<$<CONFIG:Release>:...> generator expressions, which evaluate
+                    // to empty for Debug. Force Release so the Conan targets resolve correctly.
+                    "-DCMAKE_BUILD_TYPE=Release"
                 )
             }
         }
