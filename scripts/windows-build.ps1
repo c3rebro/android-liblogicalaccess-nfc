@@ -443,17 +443,22 @@ tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
     $cmakeLists = Join-Path $source 'CMakeLists.txt'
     $cmakeContent = Get-Content $cmakeLists -Raw
     $needsCmakePatch = ($cmakeContent -match '(?m)^add_subdirectory\(samples/basic\)') -or
-                       ($cmakeContent -notmatch 'max-page-size=16384')
+                       ($cmakeContent -notmatch 'set\(CMAKE_SHARED_LINKER_FLAGS[^)]*max-page-size=16384')
     if ($needsCmakePatch) {
         # Patch 1: disable samples/basic (links -lpcscreaders, desktop-only)
         $patched = $cmakeContent -replace '(?m)^add_subdirectory\(samples/basic\)',
             "if (NOT BUILD_TESTING STREQUAL OFF)`r`n    add_subdirectory(samples/basic)`r`nendif ()"
-        # Patch 2: 16 KB page alignment required for Android 15+ (tools.build:sharedlinkflags
-        # is not reliably propagated through the NDK CMake toolchain chain)
-        if ($patched -notmatch 'max-page-size=16384') {
-            $pageFlag = "if (CMAKE_SYSTEM_NAME STREQUAL `"Android`")`r`n" +
-                        "    add_link_options(`"-Wl,-z,max-page-size=16384`")`r`nendif ()`r`n`r`n"
-            $patched = $pageFlag + $patched
+        # Remove any stale add_link_options block (wrong placement — before project() it
+        # is reset by CMake platform file initialization during project() execution)
+        $patched = $patched -replace '(?m)^if \(CMAKE_SYSTEM_NAME STREQUAL "Android"\)\r?\n\s*add_link_options\("[^"]*max-page-size[^"]*"\)\r?\nendif \(\)\r?\n(\r?\n)?', ''
+        # Patch 2: 16 KB page alignment required for Android 15+.
+        # set(CMAKE_SHARED_LINKER_FLAGS) is inserted after project(logicalaccess) so it
+        # survives platform file initialization; add_link_options before project() is
+        # reset when CMake's platform files re-initialize linker flag variables.
+        if ($patched -notmatch 'set\(CMAKE_SHARED_LINKER_FLAGS[^)]*max-page-size=16384') {
+            $pageBlock = "`r`n`r`nif (CMAKE_SYSTEM_NAME STREQUAL `"Android`")`r`n" +
+                         "    set(CMAKE_SHARED_LINKER_FLAGS `"`${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384`")`r`nendif ()"
+            $patched = $patched.Replace('project(logicalaccess)', "project(logicalaccess)$pageBlock")
         }
         [System.IO.File]::WriteAllText($cmakeLists, $patched, [System.Text.Encoding]::UTF8)
         & $Git -C $source add CMakeLists.txt

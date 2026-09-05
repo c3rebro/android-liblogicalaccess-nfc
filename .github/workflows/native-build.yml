@@ -77,8 +77,10 @@ jobs:
           CMAKE_LISTS=".tools/liblogicalaccess-$LLA_VERSION/CMakeLists.txt"
           # Patch 1: disable samples/basic (links -lpcscreaders, desktop-only)
           sed -i 's|^add_subdirectory(samples/basic)|if (NOT BUILD_TESTING STREQUAL OFF)\n    add_subdirectory(samples/basic)\nendif ()|' "$CMAKE_LISTS"
-          # Patch 2: 16 KB page alignment for Android 15+
-          sed -i '1s|^|if (CMAKE_SYSTEM_NAME STREQUAL "Android")\n    add_link_options("-Wl,-z,max-page-size=16384")\nendif ()\n\n|' "$CMAKE_LISTS"
+          # Patch 2: 16 KB page alignment for Android 15+.
+          # Inserted after project(logicalaccess) so it survives CMake platform file
+          # initialization; add_link_options before project() is reset by those files.
+          sed -i 's/^project(logicalaccess)$/project(logicalaccess)\n\nif (CMAKE_SYSTEM_NAME STREQUAL "Android")\n    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")\nendif ()/' "$CMAKE_LISTS"
           cd ".tools/liblogicalaccess-$LLA_VERSION"
           git add CMakeLists.txt
           git -c user.email='ci@local' -c user.name='ci' \
