@@ -512,20 +512,37 @@ tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
         & icacls $conanHome /grant "${grantee}:(OI)(CI)F" /T /C 2>&1 | Out-Null
     }
 
-    # Remove any partial/stale boost and openssl binaries from the Conan cache, but only
-    # when a full build is actually needed (i.e. the deployed .so files are not yet present).
-    # This avoids discarding a valid cached package on every run while still clearing the
-    # broken partial state left by a previously-interrupted build.
-    # OpenSSL is cleared alongside boost because it was previously built with build_type=Debug
-    # (which caused '-MDd' unknown-argument failures with the NDK clang).  Now that the
-    # profile uses build_type=Release we must discard the stale Debug package.
+    # Remove any partial/stale binaries from the Conan cache when a fresh build is needed.
+    # Conan's binary hash does not include sharedlinkflags, so changing the link flags
+    # (e.g. adding -Wl,-z,max-page-size=16384) does NOT automatically invalidate the cache.
+    # We detect staleness by checking whether the deployed liblogicalaccess.so has PT_LOAD
+    # segments aligned to 16 KB (0x4000).  If not, we clear all packages so they are
+    # relinked from source with the updated profile sharedlinkflags.
     $deployCheck = Join-Path $tools 'conan-deploy\android-arm64'
+    $jniRoot = Join-Path $tools 'jniLibs\arm64-v8a'
+    $llaDeployed = Join-Path $jniRoot 'liblogicalaccess.so'
+
+    $needsRebuild = $false
     $boostDeploySoFiles = @(Get-ChildItem $deployCheck -Recurse -Filter 'libboost_system.so' `
         -ErrorAction SilentlyContinue)
     if ($boostDeploySoFiles.Count -eq 0) {
-        Step 'Clearing any partial Boost and OpenSSL Conan cache before fresh build'
+        $needsRebuild = $true
+    } elseif (Test-Path $llaDeployed) {
+        # Check PT_LOAD alignment; 16 KB-aligned binaries show 0x4000 in readelf -Wl output.
+        $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+        if ($wsl) {
+            $llaWsl = '/mnt/' + $llaDeployed.Replace('\','/').Replace(':','').ToLower().TrimStart('/')
+            $alignCheck = & wsl.exe -- readelf -Wl $llaWsl 2>$null | Select-String '0x4000'
+            if (-not $alignCheck) { $needsRebuild = $true }
+        }
+    }
+
+    if ($needsRebuild) {
+        Step 'Clearing Conan package cache for full rebuild (link flags or binaries changed)'
         & $Conan remove 'boost/*' --confirm 2>&1 | Out-Null
         & $Conan remove 'openssl/*' --confirm 2>&1 | Out-Null
+        & $Conan remove 'logicalaccess/*' --confirm 2>&1 | Out-Null
+        & $Conan remove 'zlib/*' --confirm 2>&1 | Out-Null
     }
     & $Conan create $source `
         '-pr:h' $profile '-pr:b' default `
