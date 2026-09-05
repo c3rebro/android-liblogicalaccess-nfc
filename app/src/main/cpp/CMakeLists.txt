@@ -27,6 +27,9 @@ add_library(
 
 target_compile_features(lla_android_bridge PRIVATE cxx_std_17)
 
+# Required for Android 15+ 16 KB page size compatibility.
+target_link_options(lla_android_bridge PRIVATE "-Wl,-z,max-page-size=16384")
+
 target_link_libraries(
     lla_android_bridge
     PRIVATE

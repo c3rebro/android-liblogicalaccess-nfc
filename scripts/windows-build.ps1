@@ -416,7 +416,7 @@ tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:compiler_executables={"c": "$ndkBin/clang.exe", "cpp": "$ndkBin/clang++.exe", "ar": "$ndkBin/llvm-ar.exe", "ranlib": "$ndkBin/llvm-ranlib.exe"}
 tools.build:cflags=["--target=$apiTarget"]
 tools.build:cxxflags=["--target=$apiTarget"]
-tools.build:sharedlinkflags=["--target=$apiTarget"]
+tools.build:sharedlinkflags=["--target=$apiTarget", "-Wl,-z,max-page-size=16384"]
 tools.build:sysroot=$ndkSysroot
 tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
 "@ | Set-Content $profile -Encoding ASCII
@@ -531,6 +531,7 @@ tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
         '-pr:h' $profile '-pr:b' default `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_PKCS=False" `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_LIBUSB=False" `
+        '-o:h' 'openssl/*:shared=False' `
         @boostAndroidOpts `
         '--build=missing' '--test-folder='
     if ($LASTEXITCODE -ne 0) { Fail 'Conan build of liblogicalaccess for Android failed.' }
@@ -547,6 +548,7 @@ tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
         '-pr:h' $profile '-pr:b' default `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_PKCS=False" `
         '-o:h' "logicalaccess/$LlaVersion`:LLA_BUILD_LIBUSB=False" `
+        '-o:h' 'openssl/*:shared=False' `
         @boostAndroidOpts `
         '--build=missing' `
         '--deployer=full_deploy' '--deployer-folder' $deploy `

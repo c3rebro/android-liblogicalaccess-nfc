@@ -106,7 +106,7 @@ jobs:
           tools.build:compiler_executables={"c": "${BIN}/aarch64-linux-android26-clang", "cpp": "${BIN}/aarch64-linux-android26-clang++", "ar": "${BIN}/llvm-ar", "ranlib": "${BIN}/llvm-ranlib"}
           tools.build:cflags=["--target=aarch64-linux-android26"]
           tools.build:cxxflags=["--target=aarch64-linux-android26"]
-          tools.build:sharedlinkflags=["--target=aarch64-linux-android26"]
+          tools.build:sharedlinkflags=["--target=aarch64-linux-android26", "-Wl,-z,max-page-size=16384"]
           tools.build:sysroot=${SYSROOT}
           tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
           EOF
@@ -127,6 +127,7 @@ jobs:
             -pr:b default \
             -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_PKCS=False" \
             -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_LIBUSB=False" \
+            -o:h openssl/*:shared=False \
             -o:h boost/*:without_stacktrace=True \
             -o:h boost/*:without_locale=True \
             -o:h boost/*:without_iostreams=True \
@@ -166,6 +167,7 @@ jobs:
             -pr:b default \
             -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_PKCS=False" \
             -o:h "logicalaccess/$LLA_VERSION:LLA_BUILD_LIBUSB=False" \
+            -o:h openssl/*:shared=False \
             -o:h boost/*:without_stacktrace=True \
             -o:h boost/*:without_locale=True \
             -o:h boost/*:without_iostreams=True \
