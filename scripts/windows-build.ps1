@@ -442,13 +442,23 @@ tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
     # conan export's revision_mode='scm' check keeps passing on subsequent runs.
     $cmakeLists = Join-Path $source 'CMakeLists.txt'
     $cmakeContent = Get-Content $cmakeLists -Raw
-    if ($cmakeContent -match '(?m)^add_subdirectory\(samples/basic\)') {
+    $needsCmakePatch = ($cmakeContent -match '(?m)^add_subdirectory\(samples/basic\)') -or
+                       ($cmakeContent -notmatch 'max-page-size=16384')
+    if ($needsCmakePatch) {
+        # Patch 1: disable samples/basic (links -lpcscreaders, desktop-only)
         $patched = $cmakeContent -replace '(?m)^add_subdirectory\(samples/basic\)',
             "if (NOT BUILD_TESTING STREQUAL OFF)`r`n    add_subdirectory(samples/basic)`r`nendif ()"
+        # Patch 2: 16 KB page alignment required for Android 15+ (tools.build:sharedlinkflags
+        # is not reliably propagated through the NDK CMake toolchain chain)
+        if ($patched -notmatch 'max-page-size=16384') {
+            $pageFlag = "if (CMAKE_SYSTEM_NAME STREQUAL `"Android`")`r`n" +
+                        "    add_link_options(`"-Wl,-z,max-page-size=16384`")`r`nendif ()`r`n`r`n"
+            $patched = $pageFlag + $patched
+        }
         [System.IO.File]::WriteAllText($cmakeLists, $patched, [System.Text.Encoding]::UTF8)
         & $Git -C $source add CMakeLists.txt
         & $Git -C $source -c user.email='build@local' -c user.name='build' `
-            commit -m "Disable samples/basic for Android cross-compile (no PCSC)"
+            commit -m "Disable samples/basic and add 16KB page alignment for Android cross-compile"
         & $Git -C $source tag -f $LlaVersion
         if ($LASTEXITCODE -ne 0) { Fail "Failed to patch liblogicalaccess CMakeLists.txt." }
     }

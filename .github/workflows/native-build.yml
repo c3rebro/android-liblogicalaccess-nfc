@@ -68,11 +68,22 @@ jobs:
             conan-android-arm64-${{ runner.os }}-ndk${{ env.NDK_VERSION }}-lla${{ env.LLA_VERSION }}-
 
       # ── liblogicalaccess source ──────────────────────────────────────────────
-      - name: Clone liblogicalaccess ${{ env.LLA_VERSION }}
+      - name: Clone and patch liblogicalaccess ${{ env.LLA_VERSION }}
         run: |
           git clone --depth 1 --branch "$LLA_VERSION" \
             https://github.com/liblogicalaccess/liblogicalaccess.git \
             ".tools/liblogicalaccess-$LLA_VERSION"
+
+          CMAKE_LISTS=".tools/liblogicalaccess-$LLA_VERSION/CMakeLists.txt"
+          # Patch 1: disable samples/basic (links -lpcscreaders, desktop-only)
+          sed -i 's|^add_subdirectory(samples/basic)|if (NOT BUILD_TESTING STREQUAL OFF)\n    add_subdirectory(samples/basic)\nendif ()|' "$CMAKE_LISTS"
+          # Patch 2: 16 KB page alignment for Android 15+
+          sed -i '1s|^|if (CMAKE_SYSTEM_NAME STREQUAL "Android")\n    add_link_options("-Wl,-z,max-page-size=16384")\nendif ()\n\n|' "$CMAKE_LISTS"
+          cd ".tools/liblogicalaccess-$LLA_VERSION"
+          git add CMakeLists.txt
+          git -c user.email='ci@local' -c user.name='ci' \
+            commit -m "Disable samples/basic and add 16KB page alignment for Android cross-compile"
+          git tag -f "$LLA_VERSION"
 
       # ── Conan host profile ───────────────────────────────────────────────────
       - name: Generate Conan Android arm64 profile
