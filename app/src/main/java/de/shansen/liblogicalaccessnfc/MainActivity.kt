@@ -14,6 +14,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
 import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
+import de.shansen.rfcard.DesfireAuthenticate
+import de.shansen.rfcard.DesfireFactoryDefaults
 import de.shansen.rfcard.DesfireKey
 import de.shansen.rfcard.DesfireKeyType
 import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
@@ -43,6 +45,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private val quickCheckService = DesfireQuickCheckService()
     private val formatUseCase = DesfireFormatUseCase()
     private val factoryResetUseCase = DesfireFactoryResetUseCase()
+
+    private data class DefaultPiccCandidate(val label: String, val create: () -> DesfireKey)
+    private val defaultPiccCandidates = listOf(
+        DefaultPiccCandidate("DES zeros (factory)") { DesfireFactoryDefaults.piccMasterKey() },
+        DefaultPiccCandidate("AES zeros") { DesfireKey(ByteArray(16), DesfireKeyType.AES, 0, 0) }
+    )
 
     var quickCheckConfig = DesfireQuickCheckConfig()
         private set
@@ -336,7 +344,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
         val report = quickCheckService.run(
             backend = NativeDesfireCardBackend(tag.id),
-            config = quickCheckConfig
+            config = buildQuickCheckConfigWithDefaults()
         )
         val document = DesfireQuickCheckReportDocumentFactory.from(
             report = report,
@@ -348,7 +356,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             )
         )
 
+        // Auto-set PICC master key if a default candidate authenticated the directory listing
+        val detectedPiccLabel = maybeAutoSetPiccMasterKey(report.directoryAuthenticatedWith?.label)
+
         runOnUiThread {
+            if (detectedPiccLabel != null) settingsFragment.updateKeySummaries()
+
             val item = ScanHistoryItem(
                 uid = tag.id.toHex(),
                 cardLabel = "DESFire",
@@ -362,7 +375,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             val reportError = report.error
             actionsFragment.updateStatus(when {
                 reportError != null -> "Quick Check failed: ${report.errorMessage ?: reportError.rfidGearName}"
-                firstMissingKeyAid != null -> "Quick Check partial: AID 0x%06X requires authentication.".format(firstMissingKeyAid)
+                detectedPiccLabel != null && firstMissingKeyAid == null ->
+                    "Quick Check complete — PICC key auto-detected: $detectedPiccLabel."
+                detectedPiccLabel != null ->
+                    "Quick Check partial — PICC key: $detectedPiccLabel. AID 0x%06X needs app key.".format(firstMissingKeyAid)
+                firstMissingKeyAid != null ->
+                    "Quick Check partial: AID 0x%06X requires authentication.".format(firstMissingKeyAid)
                 else -> "Quick Check complete."
             })
 
@@ -370,6 +388,47 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 showAddQuickCheckKeyDialog(firstMissingKeyAid)
             }
         }
+    }
+
+    /** Builds a Quick Check config that always probes the two factory-default PICC keys first,
+     *  then the user-configured PICC key (if any), then any manually-added piccKeys. */
+    private fun buildQuickCheckConfigWithDefaults(): DesfireQuickCheckConfig {
+        val allPiccCandidates = buildList {
+            defaultPiccCandidates.forEach { add(DesfireQuickCheckKey(it.label, it.create())) }
+            piccMasterKey?.let { key ->
+                add(DesfireQuickCheckKey(piccMasterKeyLabel ?: "User PICC key", key))
+            }
+            addAll(quickCheckConfig.piccKeys)
+        }
+        return quickCheckConfig.copy(piccKeys = allPiccCandidates)
+    }
+
+    /** If [authenticatedLabel] matches a default candidate and no PICC key is configured yet,
+     *  auto-sets [piccMasterKey] and returns the detected label; otherwise returns null. */
+    private fun maybeAutoSetPiccMasterKey(authenticatedLabel: String?): String? {
+        if (authenticatedLabel == null || piccMasterKey != null) return null
+        val matched = defaultPiccCandidates.find { it.label == authenticatedLabel } ?: return null
+        piccMasterKey = matched.create()
+        piccMasterKeyLabel = "Auto: ${matched.label}"
+        return matched.label
+    }
+
+    /** Tries each default PICC candidate against the card (transport must be attached).
+     *  Returns a fresh key instance for the first one that authenticates, or null. */
+    private fun probeDefaultPiccKey(tag: Tag): DesfireKey? {
+        for (candidate in defaultPiccCandidates) {
+            val key = candidate.create()
+            val backend = NativeDesfireCardBackend(tag.id)
+            val connectResult = backend.connect()
+            if (!connectResult.isSuccess) { backend.disconnect(); continue }
+            val authResult = backend.execute(
+                DesfireAuthenticate(appId = 0, key = key)
+            )
+            backend.disconnect()
+            if (authResult.isSuccess) return key
+            key.clear()
+        }
+        return null
     }
 
     private fun runFormat(tag: Tag, uidText: String, techList: List<String>) {
@@ -387,12 +446,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             return
         }
 
-        val currentKey = piccMasterKey
+        val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)
         if (currentKey == null) {
             runOnUiThread {
                 activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
                 actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Format requires a PICC master key. Configure it in Settings first.")
+                actionsFragment.updateStatus("Format: no default PICC key matched. Configure it in Settings.")
             }
             return
         }
@@ -462,12 +521,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             return
         }
 
-        val currentKey = piccMasterKey
+        val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)
         if (currentKey == null) {
             runOnUiThread {
                 activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
                 actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Factory Reset requires a PICC master key. Configure it in Settings first.")
+                actionsFragment.updateStatus("Factory Reset: no default PICC key matched. Configure it in Settings.")
             }
             return
         }
