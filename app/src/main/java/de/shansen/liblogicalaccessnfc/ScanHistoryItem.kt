@@ -11,5 +11,6 @@ data class ScanHistoryItem(
     val document: DesfireQuickCheckReportDocument? = null,
     val formatResult: DesfireFormatResult? = null,
     val factoryResetResult: DesfireFactoryResetResult? = null,
+    val detectedPiccKeyLabel: String? = null,
     var isExpanded: Boolean = false
 )

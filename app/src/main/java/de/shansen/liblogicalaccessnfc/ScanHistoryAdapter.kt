@@ -61,7 +61,13 @@ class ScanHistoryAdapter(
     }
 
     private fun buildDetailsText(item: ScanHistoryItem): String = when {
-        item.document != null -> DesfireQuickCheckTextRenderer.render(item.document)
+        item.document != null -> buildString {
+            item.detectedPiccKeyLabel?.let {
+                appendLine("PICC master key: $it [auto-detected]")
+                appendLine()
+            }
+            append(DesfireQuickCheckTextRenderer.render(item.document))
+        }
         item.formatResult != null -> buildString {
             appendLine("Format result: ${item.formatResult.status.name}")
             item.formatResult.message?.let { appendLine(it) }

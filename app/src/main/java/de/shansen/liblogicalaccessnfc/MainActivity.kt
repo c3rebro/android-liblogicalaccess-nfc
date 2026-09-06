@@ -356,8 +356,24 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             )
         )
 
-        // Auto-set PICC master key if a default candidate authenticated the directory listing
-        val detectedPiccLabel = maybeAutoSetPiccMasterKey(report.directoryAuthenticatedWith?.label)
+        // Case 1: directory required auth → service already tried piccKeys, check which one worked
+        val directoryAuthLabel = maybeAutoSetPiccMasterKey(report.directoryAuthenticatedWith?.label)
+
+        // Case 2: directory was public → service never tried piccKeys; probe explicitly so the
+        //         user sees the PICC key status even for factory-fresh cards
+        val explicitProbeLabel: String?
+        if (piccMasterKey == null) {
+            val probe = probeDefaultPiccKey(tag)
+            explicitProbeLabel = probe?.first
+            if (probe != null) {
+                piccMasterKey = probe.second
+                piccMasterKeyLabel = "Auto: ${probe.first}"
+            }
+        } else {
+            explicitProbeLabel = null
+        }
+
+        val detectedPiccLabel = directoryAuthLabel ?: explicitProbeLabel
 
         runOnUiThread {
             if (detectedPiccLabel != null) settingsFragment.updateKeySummaries()
@@ -366,7 +382,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 uid = tag.id.toHex(),
                 cardLabel = "DESFire",
                 timestamp = System.currentTimeMillis(),
-                document = document
+                document = document,
+                detectedPiccKeyLabel = detectedPiccLabel
             )
             resultsFragment.addScanResult(item)
             binding.bottomNav.selectedItemId = R.id.nav_results
@@ -414,18 +431,16 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     }
 
     /** Tries each default PICC candidate against the card (transport must be attached).
-     *  Returns a fresh key instance for the first one that authenticates, or null. */
-    private fun probeDefaultPiccKey(tag: Tag): DesfireKey? {
+     *  Returns the candidate label and a fresh key for the first one that authenticates, or null. */
+    private fun probeDefaultPiccKey(tag: Tag): Pair<String, DesfireKey>? {
         for (candidate in defaultPiccCandidates) {
             val key = candidate.create()
             val backend = NativeDesfireCardBackend(tag.id)
             val connectResult = backend.connect()
-            if (!connectResult.isSuccess) { backend.disconnect(); continue }
-            val authResult = backend.execute(
-                DesfireAuthenticate(appId = 0, key = key)
-            )
+            if (!connectResult.isSuccess) { backend.disconnect(); key.clear(); continue }
+            val authResult = backend.execute(DesfireAuthenticate(appId = 0, key = key))
             backend.disconnect()
-            if (authResult.isSuccess) return key
+            if (authResult.isSuccess) return candidate.label to key
             key.clear()
         }
         return null
@@ -446,7 +461,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             return
         }
 
-        val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)
+        val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)?.second
         if (currentKey == null) {
             runOnUiThread {
                 activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
@@ -521,7 +536,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             return
         }
 
-        val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)
+        val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)?.second
         if (currentKey == null) {
             runOnUiThread {
                 activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
