@@ -1,69 +1,73 @@
 package de.shansen.liblogicalaccessnfc
 
-import android.net.Uri
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.widget.ArrayAdapter
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
 import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
+import de.shansen.rfcard.DesfireKey
 import de.shansen.rfcard.DesfireKeyType
 import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
+import de.shansen.rfidgearruntime.DesfireQuickCheckKey
 import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
 import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocument
 import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocumentFactory
 import de.shansen.rfidgearruntime.DesfireQuickCheckReportEnvironment
 import de.shansen.rfidgearruntime.DesfireQuickCheckService
 import de.shansen.rfidgearruntime.DesfireQuickCheckTextRenderer
-import de.shansen.rfidgearruntime.RfidGearAction
-import de.shansen.rfidgearruntime.RfidGearActionSafetyPolicy
-import de.shansen.rfidgearruntime.RfidGearTaskCompiler
-import de.shansen.rfproject.RfExecutionPlanCompiler
-import de.shansen.rfproject.RfProjectReader
-import de.shansen.rfproject.RfProjectValidator
-import de.shansen.rfproject.RfValidationSeverity
-import de.shansen.rfusecase.BuiltInUseCaseCatalog
-import de.shansen.rfusecase.DesfireFactoryResetPreflight
+import de.shansen.rfusecase.DesfireFactoryResetAuthorization
 import de.shansen.rfusecase.DesfireFactoryResetUseCase
-import de.shansen.rfusecase.DesfireFormatPreflight
+import de.shansen.rfusecase.DesfireFormatAuthorization
 import de.shansen.rfusecase.DesfireFormatUseCase
 import java.time.OffsetDateTime
+import java.util.concurrent.CompletableFuture
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
-    private enum class ActiveScanUseCase {
-        QUICK_CHECK,
-        FORMAT_PREFLIGHT,
-        FACTORY_RESET_PREFLIGHT
+    enum class ActiveScanUseCase {
+        QUICK_CHECK, FORMAT, FACTORY_RESET
     }
 
     private lateinit var binding: ActivityMainBinding
-    private var adapter: NfcAdapter? = null
-    private val projectReader = RfProjectReader()
+    private var nfcAdapter: NfcAdapter? = null
+
     private val quickCheckService = DesfireQuickCheckService()
     private val formatUseCase = DesfireFormatUseCase()
     private val factoryResetUseCase = DesfireFactoryResetUseCase()
-    private var quickCheckConfig = DesfireQuickCheckConfig()
-    private var lastQuickCheckDocument: DesfireQuickCheckReportDocument? = null
-    private var lastFormatPreflight: DesfireFormatPreflight? = null
-    private var lastFactoryResetPreflight: DesfireFactoryResetPreflight? = null
-    private var activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+
+    var quickCheckConfig = DesfireQuickCheckConfig()
+        private set
+    var piccMasterKeyLabel: String? = null
+        private set
+    var piccMasterKey: DesfireKey? = null
+        private set
+    var activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+        internal set
+
+    private lateinit var actionsFragment: ActionsFragment
+    private lateinit var resultsFragment: ResultsFragment
+    private lateinit var settingsFragment: SettingsFragment
+
+    private var pendingExportDocument: DesfireQuickCheckReportDocument? = null
 
     private val openProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) loadProject(uri)
+        if (uri != null) actionsFragment.loadProjectFromUri(uri)
     }
 
     private val createQuickCheckPdf = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
     ) { uri ->
         if (uri == null) return@registerForActivityResult
-        val document = lastQuickCheckDocument ?: return@registerForActivityResult
-
+        val document = pendingExportDocument ?: return@registerForActivityResult
         Thread {
             val result = runCatching {
                 contentResolver.openOutputStream(uri)?.use { output ->
@@ -72,9 +76,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
             runOnUiThread {
                 result.onSuccess {
-                    binding.status.text = "Quick Check PDF exported."
+                    actionsFragment.updateStatus("Quick Check PDF exported.")
                 }.onFailure { error ->
-                    binding.status.text = "PDF export failed: ${error.message ?: error.javaClass.simpleName}"
+                    actionsFragment.updateStatus("PDF export failed: ${error.message ?: error.javaClass.simpleName}")
                 }
             }
         }.start()
@@ -85,49 +89,48 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.selectQuickCheckUseCase.setOnClickListener {
-            selectQuickCheckUseCase()
-        }
-        binding.selectFormatUseCase.setOnClickListener {
-            selectFormatPreflightUseCase()
-        }
-        binding.selectFactoryResetUseCase.setOnClickListener {
-            selectFactoryResetPreflightUseCase()
-        }
-        binding.openProject.setOnClickListener {
-            openProject.launch(arrayOf("*/*"))
-        }
-        binding.addQuickCheckKey.setOnClickListener {
-            showAddQuickCheckKeyDialog()
-        }
-        binding.clearQuickCheckKeys.setOnClickListener {
-            clearSessionQuickCheckKeys()
-        }
-        binding.exportQuickCheckPdf.setOnClickListener {
-            val document = lastQuickCheckDocument
-            if (document == null) {
-                binding.status.text = "Run a DESFire Quick Check before exporting a PDF."
-            } else {
-                val uid = document.card.uid.ifBlank { "unknown" }
-                createQuickCheckPdf.launch("desfire-quick-check-$uid.pdf")
-            }
-        }
-        updateQuickCheckKeySummary()
-        updateActiveUseCaseSummary()
-
-        adapter = NfcAdapter.getDefaultAdapter(this)
-        binding.status.text = when {
-            adapter == null -> "This device has no NFC adapter."
-            adapter?.isEnabled != true -> "NFC is disabled."
-            else -> "Ready. Hold a DESFire card near the phone for read-only Quick Check."
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.rootLayout) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            binding.fragmentContainer.updatePadding(top = bars.top)
+            binding.bottomNav.updatePadding(bottom = bars.bottom)
+            insets
         }
 
-        binding.details.text = "Native bridge: ${NativeBridge.version()}"
+        if (savedInstanceState == null) {
+            actionsFragment = ActionsFragment()
+            resultsFragment = ResultsFragment()
+            settingsFragment = SettingsFragment()
+            supportFragmentManager.beginTransaction()
+                .add(R.id.fragmentContainer, actionsFragment, TAG_ACTIONS)
+                .add(R.id.fragmentContainer, resultsFragment, TAG_RESULTS)
+                .add(R.id.fragmentContainer, settingsFragment, TAG_SETTINGS)
+                .hide(resultsFragment)
+                .hide(settingsFragment)
+                .commitNow()
+        } else {
+            actionsFragment = supportFragmentManager.findFragmentByTag(TAG_ACTIONS) as ActionsFragment
+            resultsFragment = supportFragmentManager.findFragmentByTag(TAG_RESULTS) as ResultsFragment
+            settingsFragment = supportFragmentManager.findFragmentByTag(TAG_SETTINGS) as SettingsFragment
+        }
+
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            showFragment(item.itemId)
+            true
+        }
+
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        val nfcStatus = when {
+            nfcAdapter == null -> "This device has no NFC adapter."
+            nfcAdapter?.isEnabled != true -> "NFC is disabled."
+            else -> "Ready. Hold a DESFire card near the phone."
+        }
+        actionsFragment.updateStatus(nfcStatus)
     }
 
     override fun onResume() {
         super.onResume()
-        adapter?.enableReaderMode(
+        nfcAdapter?.enableReaderMode(
             this,
             this,
             NfcAdapter.FLAG_READER_NFC_A or
@@ -140,50 +143,51 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     }
 
     override fun onPause() {
-        adapter?.disableReaderMode(this)
+        nfcAdapter?.disableReaderMode(this)
         super.onPause()
     }
 
-    private fun selectQuickCheckUseCase() {
-        activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
-        updateActiveUseCaseSummary()
-        binding.status.text = "Quick Check selected. Hold a DESFire card near the phone."
-    }
-
-    private fun selectFormatPreflightUseCase() {
-        activeScanUseCase = ActiveScanUseCase.FORMAT_PREFLIGHT
-        lastFormatPreflight = null
-        updateActiveUseCaseSummary()
-        binding.status.text =
-            "Format preflight selected. Present the DESFire card to inspect it. No format command will be sent."
-    }
-
-    private fun selectFactoryResetPreflightUseCase() {
-        activeScanUseCase = ActiveScanUseCase.FACTORY_RESET_PREFLIGHT
-        lastFactoryResetPreflight = null
-        updateActiveUseCaseSummary()
-        binding.status.text =
-            "Factory Reset preflight selected. Present the DESFire card to inspect it. No format or key-change command will be sent."
-    }
-
-    private fun updateActiveUseCaseSummary() {
-        binding.activeUseCaseSummary.text = when (activeScanUseCase) {
-            ActiveScanUseCase.QUICK_CHECK ->
-                "Active use case: ${BuiltInUseCaseCatalog.desfireQuickCheck.title} [READ ONLY]"
-            ActiveScanUseCase.FORMAT_PREFLIGHT ->
-                "Active use case: ${BuiltInUseCaseCatalog.desfireFormat.title} [DESTRUCTIVE] - preflight only"
-            ActiveScanUseCase.FACTORY_RESET_PREFLIGHT ->
-                "Active use case: ${BuiltInUseCaseCatalog.desfireFactoryReset.title} [DESTRUCTIVE] - preflight only"
+    private fun showFragment(id: Int) {
+        val tx = supportFragmentManager.beginTransaction()
+        listOf(
+            R.id.nav_actions to actionsFragment,
+            R.id.nav_results to resultsFragment,
+            R.id.nav_settings to settingsFragment
+        ).forEach { (navId, fragment) ->
+            if (navId == id) tx.show(fragment) else tx.hide(fragment)
         }
+        tx.commit()
     }
 
-    private fun showAddQuickCheckKeyDialog(prefillAid: Int? = null) {
+    // --- Methods called by ActionsFragment ---
+
+    fun selectQuickCheckUseCase() {
+        activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+        actionsFragment.updateUseCaseSummary()
+        actionsFragment.updateStatus("Quick Check selected. Hold a DESFire card near the phone.")
+    }
+
+    fun selectFormatUseCase() {
+        activeScanUseCase = ActiveScanUseCase.FORMAT
+        actionsFragment.updateUseCaseSummary()
+        actionsFragment.updateStatus("Format selected. Present the DESFire card — a confirmation dialog will appear.")
+    }
+
+    fun selectFactoryResetUseCase() {
+        activeScanUseCase = ActiveScanUseCase.FACTORY_RESET
+        actionsFragment.updateUseCaseSummary()
+        actionsFragment.updateStatus("Factory Reset selected. Present the DESFire card — a confirmation dialog will appear.")
+    }
+
+    fun launchOpenProject() {
+        openProject.launch(arrayOf("*/*"))
+    }
+
+    // --- Methods called by SettingsFragment ---
+
+    fun showAddQuickCheckKeyDialog(prefillAid: Int? = null) {
         val dialogBinding = DialogDesfireQuickCheckKeyBinding.inflate(layoutInflater)
-        val keyTypes = listOf(
-            DesfireKeyType.AES,
-            DesfireKeyType.TDES_3K,
-            DesfireKeyType.DES
-        )
+        val keyTypes = listOf(DesfireKeyType.AES, DesfireKeyType.TDES_3K, DesfireKeyType.DES)
         dialogBinding.keyType.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
@@ -200,6 +204,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                dialogBinding.label.error = null
+                dialogBinding.keyHex.error = null
+                dialogBinding.keyNumber.error = null
+
                 val result = runCatching {
                     val aid = DesfireQuickCheckKeyFactory.parseAid(dialogBinding.aid.text.toString())
                     val keyNo = dialogBinding.keyNumber.text.toString().trim().toIntOrNull()
@@ -216,35 +224,47 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
                 result.onSuccess { (aid, key) ->
                     quickCheckConfig = quickCheckConfig.withApplicationKey(aid, key)
-                    updateQuickCheckKeySummary()
-                    dialogBinding.keyHex.text?.clear()
-                    binding.status.text = "Key added for AID 0x%06X. Present the card again to retry Quick Check.".format(aid)
+                    settingsFragment.updateKeySummaries()
+                    actionsFragment.updateStatus("Key added for AID 0x%06X.".format(aid))
                     dialog.dismiss()
                 }.onFailure { error ->
-                    dialogBinding.keyHex.error = error.message ?: "Invalid DESFire key."
+                    val msg = error.message ?: "Invalid DESFire key."
+                    when {
+                        msg.startsWith("Key label") -> dialogBinding.label.error = msg
+                        msg.startsWith("DESFire key number") -> dialogBinding.keyNumber.error = msg
+                        else -> dialogBinding.keyHex.error = msg
+                    }
                 }
             }
         }
         dialog.show()
     }
 
-    private fun clearSessionQuickCheckKeys() {
+    fun clearSessionQuickCheckKeys() {
         quickCheckConfig.applicationKeys.values.flatten().forEach { it.key.clear() }
         quickCheckConfig.defaultApplicationKeys.forEach { it.key.clear() }
         quickCheckConfig.piccKeys.forEach { it.key.clear() }
         quickCheckConfig = DesfireQuickCheckConfig()
-        updateQuickCheckKeySummary()
     }
 
-    private fun updateQuickCheckKeySummary() {
-        if (quickCheckConfig.applicationKeys.isEmpty()) {
-            binding.quickCheckKeySummary.text =
-                "No application-specific quick-check keys configured.\nKeys are session-only."
-            return
-        }
+    fun setPiccKey(label: String, key: DesfireKey) {
+        piccMasterKey?.clear()
+        piccMasterKeyLabel = label
+        piccMasterKey = key
+    }
 
-        binding.quickCheckKeySummary.text = buildString {
-            appendLine("Quick-check application keys (session-only):")
+    fun clearPiccKey() {
+        piccMasterKey?.clear()
+        piccMasterKey = null
+        piccMasterKeyLabel = null
+    }
+
+    fun buildQuickCheckKeySummary(): String {
+        if (quickCheckConfig.applicationKeys.isEmpty()) {
+            return "No application-specific keys configured.\nKeys are session-only."
+        }
+        return buildString {
+            appendLine("Application keys (session-only):")
             quickCheckConfig.applicationKeys.toSortedMap().forEach { (aid, keys) ->
                 appendLine("AID 0x%06X".format(aid))
                 keys.forEach { key ->
@@ -254,106 +274,29 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }.trimEnd()
     }
 
-    private fun keyTypeLabel(type: DesfireKeyType): String = when (type) {
-        DesfireKeyType.AES -> "AES"
-        DesfireKeyType.TDES_3K -> "3K3DES"
-        DesfireKeyType.DES -> "DES / 2K3DES"
+    fun buildPiccKeySummary(): String {
+        val key = piccMasterKey ?: return "No PICC master key configured."
+        return "${piccMasterKeyLabel ?: "PICC master key"} [${keyTypeLabel(key.type)} key #${key.number}]"
     }
 
-    private fun loadProject(uri: Uri) {
-        binding.projectSummary.text = "Loading project..."
-        Thread {
-            val result = runCatching {
-                val sourceName = getDisplayName(uri)
-                val project = contentResolver.openInputStream(uri)?.use {
-                    projectReader.read(it, sourceName)
-                } ?: error("Unable to open selected project file.")
+    // --- Methods called by ResultsFragment ---
 
-                val validation = RfProjectValidator.validate(project)
-                val plan = if (!validation.hasErrors) RfExecutionPlanCompiler.compile(project) else null
-
-                buildString {
-                    appendLine("Project: ${sourceName ?: uri.lastPathSegment ?: "unknown"}")
-                    appendLine("Container: ${project.container}")
-                    appendLine("Manifest: ${project.manifestVersion ?: "missing"}")
-                    appendLine("Tasks: ${project.tasks.size}")
-                    appendLine()
-
-                    plan?.steps?.forEach { step ->
-                        val projectTask = project.tasks[step.position]
-                        val compileStatus = runCatching { RfidGearTaskCompiler.compile(projectTask) }
-                            .fold(
-                                onSuccess = { compiled ->
-                                    RfidGearActionSafetyPolicy.evaluate(
-                                        compiled.action,
-                                        ::currentAndroidBackendSupports
-                                    ).previewLine()
-                                },
-                                onFailure = { error -> "INVALID ${error.message ?: error.javaClass.simpleName}" }
-                            )
-
-                        append("[${step.position}] id=${step.id} ${step.modelType}")
-                        append(" :: ${step.operation ?: "(no operation)"}")
-                        step.description?.takeIf { it.isNotBlank() }?.let { append(" :: $it") }
-                        appendLine()
-                        appendLine("    Android: $compileStatus")
-                        step.condition?.let {
-                            appendLine("    when task ${it.sourceTaskId} -> ${it.expectedError}")
-                        }
-                    }
-
-                    if (validation.issues.isNotEmpty()) {
-                        appendLine()
-                        appendLine("Validation:")
-                        validation.issues.forEach { issue ->
-                            val prefix = when (issue.severity) {
-                                RfValidationSeverity.ERROR -> "ERROR"
-                                RfValidationSeverity.WARNING -> "WARN"
-                                RfValidationSeverity.INFO -> "INFO"
-                            }
-                            appendLine("$prefix ${issue.code}: ${issue.message}")
-                        }
-                    } else {
-                        appendLine()
-                        appendLine("Validation: OK")
-                    }
-
-                    appendLine()
-                    appendLine("Project execution is still disabled; built-in DESFire use cases are independent of .rfPrj execution.")
-                }
-            }
-
-            runOnUiThread {
-                binding.projectSummary.text = result.getOrElse { error ->
-                    "Project load failed:\n${error.message ?: error.javaClass.simpleName}"
-                }
-            }
-        }.start()
+    fun exportQuickCheckPdf(document: DesfireQuickCheckReportDocument) {
+        pendingExportDocument = document
+        val uid = document.card.uid.ifBlank { "unknown" }
+        createQuickCheckPdf.launch("desfire-quick-check-$uid.pdf")
     }
 
-    private fun currentAndroidBackendSupports(action: RfidGearAction): Boolean = when (action) {
-        is RfidGearAction.Execute -> NativeDesfireCardBackend.supports(action.command)
-        else -> false
-    }
-
-    private fun getDisplayName(uri: Uri): String? {
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
-        }
-        return uri.lastPathSegment
-    }
+    // --- NFC tag handling ---
 
     override fun onTagDiscovered(tag: Tag) {
         val uidText = tag.id.toHex()
         val techList = tag.techList.toList()
-        val techs = techList.joinToString()
 
         val isoDep = IsoDep.get(tag)
         if (isoDep == null) {
             runOnUiThread {
-                binding.status.text = "Tag detected, but no ISO-DEP support."
-                binding.details.text = "UID: $uidText\nTechnologies: $techs"
+                actionsFragment.updateStatus("Tag detected, but no ISO-DEP support (UID: $uidText).")
             }
             return
         }
@@ -366,20 +309,19 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             NativeBridge.attachTransport(transport)
 
             when (activeScanUseCase) {
-                ActiveScanUseCase.FORMAT_PREFLIGHT -> {
-                    runFormatPreflight(tag, uidText)
+                ActiveScanUseCase.FORMAT -> {
+                    runFormat(tag, uidText, techList)
                     return
                 }
-                ActiveScanUseCase.FACTORY_RESET_PREFLIGHT -> {
-                    runFactoryResetPreflight(tag, uidText)
+                ActiveScanUseCase.FACTORY_RESET -> {
+                    runFactoryReset(tag, uidText, techList)
                     return
                 }
                 ActiveScanUseCase.QUICK_CHECK -> runQuickCheck(tag, isoDep, techList)
             }
         } catch (e: Exception) {
             runOnUiThread {
-                binding.status.text = "NFC/use-case error: ${e.message}"
-                binding.details.text = "UID: $uidText\nTechnologies: $techs\nNative bridge: ${NativeBridge.version()}"
+                actionsFragment.updateStatus("NFC error: ${e.message}")
             }
         } finally {
             NativeBridge.detachTransport()
@@ -389,7 +331,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun runQuickCheck(tag: Tag, isoDep: IsoDep, techList: List<String>) {
         runOnUiThread {
-            binding.status.text = "DESFire Quick Check running... keep the card in the NFC field."
+            actionsFragment.updateStatus("Quick Check running... keep the card in the NFC field.")
         }
 
         val report = quickCheckService.run(
@@ -407,17 +349,22 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         )
 
         runOnUiThread {
-            lastQuickCheckDocument = document
-            binding.exportQuickCheckPdf.isEnabled = true
-            binding.details.text = DesfireQuickCheckTextRenderer.render(document)
+            val item = ScanHistoryItem(
+                uid = tag.id.toHex(),
+                cardLabel = "DESFire",
+                timestamp = System.currentTimeMillis(),
+                document = document
+            )
+            resultsFragment.addScanResult(item)
+            binding.bottomNav.selectedItemId = R.id.nav_results
 
             val firstMissingKeyAid = report.needsKeys.firstOrNull()
             val reportError = report.error
-            binding.status.text = when {
+            actionsFragment.updateStatus(when {
                 reportError != null -> "Quick Check failed: ${report.errorMessage ?: reportError.rfidGearName}"
                 firstMissingKeyAid != null -> "Quick Check partial: AID 0x%06X requires authentication.".format(firstMissingKeyAid)
-                else -> "Quick Check complete (read-only)."
-            }
+                else -> "Quick Check complete."
+            })
 
             if (firstMissingKeyAid != null && !isFinishing) {
                 showAddQuickCheckKeyDialog(firstMissingKeyAid)
@@ -425,153 +372,168 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    private fun runFormatPreflight(tag: Tag, uidText: String) {
-        runOnUiThread {
-            binding.status.text = "DESFire format preflight running (read only)... keep the card in the NFC field."
+    private fun runFormat(tag: Tag, uidText: String, techList: List<String>) {
+        runOnUiThread { actionsFragment.updateStatus("Format preflight running... keep card in field.") }
+
+        val preflightResult = formatUseCase.preflight(NativeDesfireCardBackend(tag.id))
+        val preflight = preflightResult.value
+
+        if (!preflightResult.isSuccess || preflight == null) {
+            runOnUiThread {
+                activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+                actionsFragment.updateUseCaseSummary()
+                actionsFragment.updateStatus("Format preflight failed: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
+            }
+            return
         }
 
-        val result = formatUseCase.preflight(NativeDesfireCardBackend(tag.id))
+        val currentKey = piccMasterKey
+        if (currentKey == null) {
+            runOnUiThread {
+                activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+                actionsFragment.updateUseCaseSummary()
+                actionsFragment.updateStatus("Format requires a PICC master key. Configure it in Settings first.")
+            }
+            return
+        }
+
+        val confirmed = CompletableFuture<Boolean>()
+        runOnUiThread {
+            if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
+            AlertDialog.Builder(this)
+                .setTitle("Format DESFire card?")
+                .setMessage(
+                    "UID: ${preflight.identity.uid.toHex()}\n\n" +
+                    "All applications and files will be permanently deleted.\n" +
+                    "This cannot be undone.\n\n" +
+                    "Keep the card in the NFC field."
+                )
+                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
+                .setPositiveButton("Format") { _, _ -> confirmed.complete(true) }
+                .setOnCancelListener { confirmed.complete(false) }
+                .show()
+        }
+
+        if (!confirmed.get()) {
+            runOnUiThread {
+                activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+                actionsFragment.updateUseCaseSummary()
+                actionsFragment.updateStatus("Format cancelled.")
+            }
+            return
+        }
+
+        runOnUiThread { actionsFragment.updateStatus("Executing FORMAT_PICC... keep card in field.") }
+
+        val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
+        val result = formatUseCase.execute(NativeDesfireCardBackend(tag.id), authorization, currentKey)
 
         runOnUiThread {
             activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
-            updateActiveUseCaseSummary()
+            actionsFragment.updateUseCaseSummary()
+            actionsFragment.updateStatus(
+                if (result.verifiedSuccess) "Format complete: card is empty."
+                else "Format: ${result.message ?: result.status.name}"
+            )
 
-            if (!result.isSuccess) {
-                binding.status.text = "Format preflight failed: ${result.message ?: result.error.rfidGearName}"
-                binding.details.text = "UID: $uidText\nNo format command was sent."
-                return@runOnUiThread
-            }
-
-            val preflight = result.value
-            if (preflight == null) {
-                binding.status.text = "Format preflight failed: backend returned no preflight result."
-                binding.details.text = "UID: $uidText\nNo format command was sent."
-                return@runOnUiThread
-            }
-
-            lastFormatPreflight = preflight
-            binding.status.text = "Format preflight complete (read only). No format command was sent."
-            binding.details.text = formatFormatPreflight(preflight)
-            showFormatPreflightDialog(preflight)
+            val item = ScanHistoryItem(
+                uid = uidText,
+                cardLabel = "DESFire Format",
+                timestamp = System.currentTimeMillis(),
+                formatResult = result
+            )
+            resultsFragment.addScanResult(item)
+            binding.bottomNav.selectedItemId = R.id.nav_results
         }
     }
 
-    private fun runFactoryResetPreflight(tag: Tag, uidText: String) {
-        runOnUiThread {
-            binding.status.text = "DESFire Factory Reset preflight running (read only)... keep the card in the NFC field."
+    private fun runFactoryReset(tag: Tag, uidText: String, techList: List<String>) {
+        runOnUiThread { actionsFragment.updateStatus("Factory Reset preflight running... keep card in field.") }
+
+        val preflightResult = factoryResetUseCase.preflight(NativeDesfireCardBackend(tag.id))
+        val preflight = preflightResult.value
+
+        if (!preflightResult.isSuccess || preflight == null) {
+            runOnUiThread {
+                activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+                actionsFragment.updateUseCaseSummary()
+                actionsFragment.updateStatus("Factory Reset preflight failed: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
+            }
+            return
         }
 
-        val result = factoryResetUseCase.preflight(NativeDesfireCardBackend(tag.id))
+        val currentKey = piccMasterKey
+        if (currentKey == null) {
+            runOnUiThread {
+                activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+                actionsFragment.updateUseCaseSummary()
+                actionsFragment.updateStatus("Factory Reset requires a PICC master key. Configure it in Settings first.")
+            }
+            return
+        }
+
+        val confirmed = CompletableFuture<Boolean>()
+        runOnUiThread {
+            if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
+            AlertDialog.Builder(this)
+                .setTitle("Factory Reset DESFire card?")
+                .setMessage(
+                    "UID: ${preflight.identity.uid.toHex()}\n\n" +
+                    "All applications and files will be deleted.\n" +
+                    "PICC master key #0 will be reset to the DES zero key.\n" +
+                    "This cannot be undone.\n\n" +
+                    "Keep the card in the NFC field."
+                )
+                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
+                .setPositiveButton("Reset") { _, _ -> confirmed.complete(true) }
+                .setOnCancelListener { confirmed.complete(false) }
+                .show()
+        }
+
+        if (!confirmed.get()) {
+            runOnUiThread {
+                activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+                actionsFragment.updateUseCaseSummary()
+                actionsFragment.updateStatus("Factory Reset cancelled.")
+            }
+            return
+        }
+
+        runOnUiThread { actionsFragment.updateStatus("Executing Factory Reset... keep card in field.") }
+
+        val authorization = DesfireFactoryResetAuthorization.confirm(preflight, preflight.confirmationPhrase)
+        val result = factoryResetUseCase.execute(NativeDesfireCardBackend(tag.id), authorization, currentKey)
 
         runOnUiThread {
             activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
-            updateActiveUseCaseSummary()
-
-            if (!result.isSuccess) {
-                binding.status.text = "Factory Reset preflight failed: ${result.message ?: result.error.rfidGearName}"
-                binding.details.text = "UID: $uidText\nNo format or key-change command was sent."
-                return@runOnUiThread
-            }
-
-            val preflight = result.value
-            if (preflight == null) {
-                binding.status.text = "Factory Reset preflight failed: backend returned no preflight result."
-                binding.details.text = "UID: $uidText\nNo format or key-change command was sent."
-                return@runOnUiThread
-            }
-
-            lastFactoryResetPreflight = preflight
-            binding.status.text = "Factory Reset preflight complete (read only). No card data was changed."
-            binding.details.text = formatFactoryResetPreflight(preflight)
-            showFactoryResetPreflightDialog(preflight)
-        }
-    }
-
-    private fun formatFormatPreflight(preflight: DesfireFormatPreflight): String = buildString {
-        appendLine("DESFire Format Preflight (READ ONLY)")
-        appendLine("UID: ${preflight.identity.uid.toHex()}")
-        val version = preflight.version
-        appendLine("Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, SW ${version.softwareMajor}.${version.softwareMinor}")
-
-        appendApplicationSummary(preflight.visibleApplicationIds)
-
-        if (preflight.warnings.isNotEmpty()) {
-            appendLine("Warnings:")
-            preflight.warnings.forEach { appendLine("  - $it") }
-        }
-        appendLine()
-        appendLine("Confirmation phrase for a future format step:")
-        appendLine(preflight.confirmationPhrase)
-        appendLine()
-        appendLine("FORMAT_PICC execution is not enabled in the Android native backend yet.")
-    }.trimEnd()
-
-    private fun formatFactoryResetPreflight(preflight: DesfireFactoryResetPreflight): String = buildString {
-        appendLine("DESFire Factory Reset Preflight (READ ONLY)")
-        appendLine("UID: ${preflight.identity.uid.toHex()}")
-        val version = preflight.version
-        appendLine("Version: HW ${version.hardwareMajor}.${version.hardwareMinor}, SW ${version.softwareMajor}.${version.softwareMinor}")
-
-        appendApplicationSummary(preflight.visibleApplicationIds)
-
-        if (preflight.warnings.isNotEmpty()) {
-            appendLine("Warnings:")
-            preflight.warnings.forEach { appendLine("  - $it") }
-        }
-        appendLine()
-        appendLine("Factory Reset target:")
-        appendLine("  - FORMAT_PICC removes all applications/files")
-        appendLine("  - PICC master key #0 -> DES / 16 zero bytes (32 hex zeros) / version 0")
-        appendLine("  - PICC key-settings bits are not changed by this use case")
-        appendLine()
-        appendLine("Confirmation phrase for a future Factory Reset step:")
-        appendLine(preflight.confirmationPhrase)
-        appendLine()
-        appendLine("Destructive Factory Reset execution is not enabled in the Android native backend yet.")
-    }.trimEnd()
-
-    private fun StringBuilder.appendApplicationSummary(applicationIds: List<Int>?) {
-        when {
-            applicationIds == null ->
-                appendLine("Applications: protected/unavailable during public preflight")
-            applicationIds.isEmpty() ->
-                appendLine("Applications: none visible")
-            else -> {
-                appendLine("Applications: ${applicationIds.size}")
-                applicationIds.sorted().forEach { aid ->
-                    appendLine("  - AID 0x%06X".format(aid))
-                }
-            }
-        }
-    }
-
-    private fun showFormatPreflightDialog(preflight: DesfireFormatPreflight) {
-        if (isFinishing) return
-        AlertDialog.Builder(this)
-            .setTitle("DESFire format preflight")
-            .setMessage(
-                "Read-only preflight completed for UID ${preflight.identity.uid.toHex()}.\n\n" +
-                    "Future destructive confirmation phrase:\n${preflight.confirmationPhrase}\n\n" +
-                    "The native FORMAT_PICC execution path is intentionally not enabled yet. No card data was changed."
+            actionsFragment.updateUseCaseSummary()
+            actionsFragment.updateStatus(
+                if (result.verifiedSuccess) "Factory Reset complete."
+                else "Factory Reset: ${result.message ?: result.status.name}"
             )
-            .setPositiveButton("OK", null)
-            .show()
-    }
 
-    private fun showFactoryResetPreflightDialog(preflight: DesfireFactoryResetPreflight) {
-        if (isFinishing) return
-        AlertDialog.Builder(this)
-            .setTitle("DESFire Factory Reset preflight")
-            .setMessage(
-                "Read-only preflight completed for UID ${preflight.identity.uid.toHex()}.\n\n" +
-                    "Factory Reset will eventually format the PICC and restore master key #0 to DES with 16 zero bytes (32 hex zeros).\n\n" +
-                    "Future destructive confirmation phrase:\n${preflight.confirmationPhrase}\n\n" +
-                    "The destructive native execution path is intentionally not enabled yet. No card data was changed."
+            val item = ScanHistoryItem(
+                uid = uidText,
+                cardLabel = "DESFire Factory Reset",
+                timestamp = System.currentTimeMillis(),
+                factoryResetResult = result
             )
-            .setPositiveButton("OK", null)
-            .show()
+            resultsFragment.addScanResult(item)
+            binding.bottomNav.selectedItemId = R.id.nav_results
+        }
     }
 
-    private fun ByteArray.toHex(): String =
-        joinToString("") { "%02X".format(it) }
+    internal fun keyTypeLabel(type: DesfireKeyType): String = when (type) {
+        DesfireKeyType.AES -> "AES"
+        DesfireKeyType.TDES_3K -> "3K3DES"
+        DesfireKeyType.DES -> "DES / 2K3DES"
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
+
+    companion object {
+        private const val TAG_ACTIONS = "actions"
+        private const val TAG_RESULTS = "results"
+        private const val TAG_SETTINGS = "settings"
+    }
 }

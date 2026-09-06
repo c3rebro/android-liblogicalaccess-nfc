@@ -7,7 +7,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="LLA NFC PoC"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="RFIDGear"
         android:supportsRtl="true"
         android:theme="@style/Theme.App">
         <activity

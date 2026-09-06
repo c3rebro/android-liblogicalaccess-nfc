@@ -19,13 +19,9 @@ import de.shansen.rfcard.DesfireReadApplicationSettings
 import de.shansen.rfcard.DesfireReadFileSettings
 import de.shansen.rfcard.DesfireAccessRights
 import de.shansen.rfcard.CardCommand
+import de.shansen.rfcard.DesfireChangePiccMasterKey
+import de.shansen.rfcard.DesfireFormatCard
 
-/**
- * Read-only DESFire CardBackend backed by liblogicalaccess through JNI.
- *
- * One instance represents one uninterrupted IsoDep/native session. Destructive
- * CardCommand implementations are deliberately not mapped here.
- */
 class NativeDesfireCardBackend(
     private val uid: ByteArray
 ) : CardBackend {
@@ -37,7 +33,9 @@ class NativeDesfireCardBackend(
             is DesfireAuthenticate,
             is DesfireReadApplicationSettings,
             is DesfireListFiles,
-            is DesfireReadFileSettings -> true
+            is DesfireReadFileSettings,
+            is DesfireFormatCard,
+            is DesfireChangePiccMasterKey -> true
 
             else -> false
         }
@@ -182,9 +180,22 @@ class NativeDesfireCardBackend(
                 )
             }
 
+            is DesfireFormatCard -> executeNative(
+                operation = NativeBridge.OP_FORMAT_CARD,
+                appId = 0,
+                key = command.piccMasterKey
+            ).mapSuccess { CardResponse.Empty }
+
+            is DesfireChangePiccMasterKey -> executeNative(
+                operation = NativeBridge.OP_CHANGE_PICC_MASTER_KEY,
+                appId = 0,
+                key = command.currentPiccMasterKey,
+                key2 = command.newPiccMasterKey
+            ).mapSuccess { CardResponse.Empty }
+
             else -> CardResult.fail(
                 CardError.PROTOCOL_CONSTRAINT,
-                "${command.javaClass.simpleName} is intentionally not available in the read-only native Quick Check backend."
+                "${command.javaClass.simpleName} is not supported by this DESFire backend."
             )
         }
     }
@@ -197,7 +208,8 @@ class NativeDesfireCardBackend(
         appId: Int = 0,
         fileNo: Int = 0,
         key: DesfireKey? = null,
-        authenticate: Boolean = false
+        authenticate: Boolean = false,
+        key2: DesfireKey? = null
     ): CardResult<ByteArray> {
         return runCatching {
             val packet = NativeBridge.desfireExecute(
@@ -208,11 +220,14 @@ class NativeDesfireCardBackend(
                 keyType = key?.type?.nativeCode ?: -1,
                 keyNo = key?.number ?: -1,
                 key = key?.bytes,
-                authenticate = authenticate
+                authenticate = authenticate,
+                key2Type = key2?.type?.nativeCode ?: -1,
+                key2No = key2?.number ?: -1,
+                key2 = key2?.bytes
             )
             decodePacket(packet)
         }.getOrElse { error ->
-            CardResult.fail(CardError.TRANSPORT_ERROR, error.message ?: "Native DESFire call failed.")
+            CardResult.fail(CardError.TRANSPORT_ERROR, error.message ?: "Native DeSFire call failed.")
         }
     }
 

@@ -37,6 +37,8 @@ constexpr int OP_AUTHENTICATE = 4;
 constexpr int OP_READ_APPLICATION_SETTINGS = 5;
 constexpr int OP_LIST_FILES = 6;
 constexpr int OP_READ_FILE_SETTINGS = 7;
+constexpr int OP_FORMAT_CARD = 8;
+constexpr int OP_CHANGE_PICC_MASTER_KEY = 9;
 
 jobject g_transport = nullptr;
 std::mutex g_transport_mutex;
@@ -348,7 +350,7 @@ std::int32_t file_length(const logicalaccess::DESFireCommands::FileSetting& sett
     }
 }
 
-std::vector<std::uint8_t> execute_read_only(
+std::vector<std::uint8_t> execute_operation(
     JNIEnv* env,
     NativeDesfireSession& session,
     jint operation,
@@ -357,7 +359,10 @@ std::vector<std::uint8_t> execute_read_only(
     jint key_type,
     jint key_no,
     jbyteArray key_data,
-    jboolean authenticate) {
+    jboolean authenticate,
+    jint key2_type,
+    jint key2_no,
+    jbyteArray key2_data) {
 
     session.enforce_thread();
     auto& commands = *session.commands;
@@ -480,8 +485,32 @@ std::vector<std::uint8_t> execute_read_only(
             return ok_packet(std::move(payload));
         }
 
+        case OP_FORMAT_CARD: {
+            // Select PICC application, authenticate with the PICC master key, then erase.
+            auto key = make_key(env, key_type, key_no, key_data);
+            commands.selectApplication(0U);
+            commands.authenticate(static_cast<unsigned char>(key_no), key);
+            commands.erase();
+            return ok_packet();
+        }
+
+        case OP_CHANGE_PICC_MASTER_KEY: {
+            // key = current PICC master key (for authentication after FORMAT reset the session).
+            // key2 = new PICC master key.
+            // selectApplication(0) -> authenticate(0, current) -> changeKey(0, new).
+            if (!key2_data) {
+                throw std::invalid_argument("CHANGE_PICC_MASTER_KEY requires a new key (key2).");
+            }
+            auto current_key = make_key(env, key_type, key_no, key_data);
+            auto new_key = make_key(env, key2_type, key2_no, key2_data);
+            commands.selectApplication(0U);
+            commands.authenticate(static_cast<unsigned char>(key_no), current_key);
+            commands.changeKey(0, new_key);
+            return ok_packet();
+        }
+
         default:
-            throw std::invalid_argument("Unknown or non-read-only DESFire operation requested.");
+            throw std::invalid_argument("Unknown DESFire operation requested.");
     }
 }
 
@@ -576,7 +605,10 @@ Java_de_shansen_liblogicalaccessnfc_NativeBridge_desfireExecute(
     jint key_type,
     jint key_no,
     jbyteArray key_data,
-    jboolean authenticate) {
+    jboolean authenticate,
+    jint key2_type,
+    jint key2_no,
+    jbyteArray key2_data) {
 
     std::vector<std::uint8_t> packet;
     try {
@@ -584,7 +616,7 @@ Java_de_shansen_liblogicalaccessnfc_NativeBridge_desfireExecute(
         if (!session) {
             packet = error_packet(STATUS_TRANSPORT_ERROR, "DESFire native session is null.");
         } else {
-            packet = execute_read_only(
+            packet = execute_operation(
                 env,
                 *session,
                 operation,
@@ -593,7 +625,10 @@ Java_de_shansen_liblogicalaccessnfc_NativeBridge_desfireExecute(
                 key_type,
                 key_no,
                 key_data,
-                authenticate);
+                authenticate,
+                key2_type,
+                key2_no,
+                key2_data);
         }
     } catch (const std::invalid_argument& error) {
         packet = error_packet(STATUS_PROTOCOL_CONSTRAINT, error.what());

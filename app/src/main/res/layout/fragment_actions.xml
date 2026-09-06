@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="RFID ACTIONS"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/selectQuickCheckUseCase"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Quick Check (read only)" />
+
+        <Button
+            android:id="@+id/selectFormatUseCase"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Format DESFire card (destructive)" />
+
+        <Button
+            android:id="@+id/selectFactoryResetUseCase"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Factory Reset DESFire card (destructive)" />
+
+        <TextView
+            android:id="@+id/activeUseCaseSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Active use case: DESFire Quick Check"
+            android:textIsSelectable="true" />
+
+        <TextView
+            android:id="@+id/nfcStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textSize="16sp"
+            android:text="Ready. Hold a DESFire card near the phone." />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="16dp"
+            android:background="?attr/colorControlNormal"
+            android:alpha="0.2" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PROJECT"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/openProject"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Open RFIDGear project" />
+
+        <TextView
+            android:id="@+id/projectSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="No .rfPrj project loaded."
+            android:textIsSelectable="true"
+            android:typeface="monospace" />
+
+    </LinearLayout>
+</ScrollView>

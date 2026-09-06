@@ -761,7 +761,7 @@ try {
 
         Step 'Checking connected physical device'
         & $adb start-server | Out-Null
-        $devices = Wait-ForDevice $adb $DeviceWaitSeconds
+        $devices = @(Wait-ForDevice $adb $DeviceWaitSeconds)
         if ($devices.Count -eq 0) {
             Fail "No authorized device found after ${DeviceWaitSeconds}s.`nEnable Developer options + USB debugging, connect the phone and accept its RSA fingerprint prompt."
         }
@@ -854,7 +854,7 @@ try {
 
     Step 'Checking connected physical device'
     & $adb start-server | Out-Null
-    $devices = Wait-ForDevice $adb $DeviceWaitSeconds
+    $devices = @(Wait-ForDevice $adb $DeviceWaitSeconds)
     if ($devices.Count -eq 0) {
         Fail "No authorized device found after ${DeviceWaitSeconds}s.`nEnable Developer options + USB debugging, connect the phone and accept its RSA fingerprint prompt."
     }

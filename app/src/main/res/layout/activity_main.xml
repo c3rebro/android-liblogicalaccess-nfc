@@ -1,111 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
-    <LinearLayout
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/fragmentContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
+        app:menu="@menu/bottom_nav_menu" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Built-in DESFire use cases"
-            android:textStyle="bold"
-            android:textSize="18sp" />
-
-        <Button
-            android:id="@+id/selectQuickCheckUseCase"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Quick Check (read only)" />
-
-        <Button
-            android:id="@+id/selectFormatUseCase"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Prepare DESFire format (destructive)" />
-
-        <Button
-            android:id="@+id/selectFactoryResetUseCase"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Prepare DESFire factory reset (destructive)" />
-
-        <TextView
-            android:id="@+id/activeUseCaseSummary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Active use case: DESFire Quick Check"
-            android:textIsSelectable="true" />
-
-        <Button
-            android:id="@+id/openProject"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Open RFIDGear project" />
-
-        <TextView
-            android:id="@+id/projectSummary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="No .rfPrj project loaded."
-            android:textIsSelectable="true"
-            android:typeface="monospace" />
-
-        <Button
-            android:id="@+id/addQuickCheckKey"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Add DESFire quick-check app key" />
-
-        <Button
-            android:id="@+id/clearQuickCheckKeys"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Clear session quick-check keys" />
-
-        <TextView
-            android:id="@+id/quickCheckKeySummary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="No application-specific quick-check keys configured."
-            android:textIsSelectable="true"
-            android:typeface="monospace" />
-
-        <Button
-            android:id="@+id/exportQuickCheckPdf"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:enabled="false"
-            android:text="Export last Quick Check as PDF" />
-
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Ready. Hold an ISO-DEP card near the phone."
-            android:textSize="18sp" />
-
-        <TextView
-            android:id="@+id/details"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:textIsSelectable="true"
-            android:typeface="monospace" />
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>

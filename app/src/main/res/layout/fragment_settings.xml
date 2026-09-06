@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="APPLICATION KEYS"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/addQuickCheckKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Add application key" />
+
+        <Button
+            android:id="@+id/clearQuickCheckKeys"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Clear all session keys" />
+
+        <TextView
+            android:id="@+id/quickCheckKeySummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="No application-specific quick-check keys configured."
+            android:textIsSelectable="true"
+            android:typeface="monospace" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="16dp"
+            android:background="?attr/colorControlNormal"
+            android:alpha="0.2" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PICC MASTER KEY"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textSize="12sp"
+            android:text="Required for Format and Factory Reset operations." />
+
+        <Button
+            android:id="@+id/setPiccKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Set PICC master key" />
+
+        <Button
+            android:id="@+id/clearPiccKey"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Clear PICC master key" />
+
+        <TextView
+            android:id="@+id/piccKeySummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="No PICC master key configured."
+            android:textIsSelectable="true"
+            android:typeface="monospace" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="16dp"
+            android:background="?attr/colorControlNormal"
+            android:alpha="0.2" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="INFO"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/versionInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textIsSelectable="true"
+            android:typeface="monospace" />
+
+    </LinearLayout>
+</ScrollView>

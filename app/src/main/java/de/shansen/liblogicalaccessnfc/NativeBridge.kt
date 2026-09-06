@@ -12,6 +12,8 @@ object NativeBridge {
     const val OP_READ_APPLICATION_SETTINGS = 5
     const val OP_LIST_FILES = 6
     const val OP_READ_FILE_SETTINGS = 7
+    const val OP_FORMAT_CARD = 8
+    const val OP_CHANGE_PICC_MASTER_KEY = 9
 
     external fun version(): String
     external fun attachTransport(transport: AndroidIsoDepTransport)
@@ -21,10 +23,12 @@ object NativeBridge {
     external fun endDesfireSession(handle: Long)
 
     /**
-     * Executes one read-only DESFire primitive in the active native session.
+     * Executes one DESFire primitive in the active native session.
      *
      * The returned packet starts with one status byte. Status 0 means success;
      * non-zero packets contain a UTF-8 error message after the status byte.
+     *
+     * key2* parameters are only used by OP_CHANGE_PICC_MASTER_KEY (new key material).
      */
     external fun desfireExecute(
         handle: Long,
@@ -34,6 +38,9 @@ object NativeBridge {
         keyType: Int = -1,
         keyNo: Int = -1,
         key: ByteArray? = null,
-        authenticate: Boolean = false
+        authenticate: Boolean = false,
+        key2Type: Int = -1,
+        key2No: Int = -1,
+        key2: ByteArray? = null
     ): ByteArray
 }
