@@ -1,6 +1,9 @@
 param(
     [switch]$SkipDeploy,
-    [switch]$SkipLaunch
+    [switch]$SkipLaunch,
+    [switch]$Clean,
+    [switch]$InstallOnly,
+    [int]$DeviceWaitSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -630,14 +633,185 @@ function Ensure-Gradle {
     return $gradle
 }
 
+function Remove-BuildArtifacts {
+    Step 'Cleaning Gradle outputs and staged native libraries (Conan package cache preserved)'
+    $jniLibs = Join-Path $Root '.tools\jniLibs\arm64-v8a'
+    $dirsToClean = @(
+        if (Test-Path $jniLibs) { $jniLibs }
+    )
+    $dirsToClean += @(Get-ChildItem $Root -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'build' } |
+        Where-Object { Test-Path $_ })
+    $removed = 0
+    foreach ($dir in $dirsToClean) {
+        if (Test-Path $dir) {
+            Remove-Item $dir -Recurse -Force
+            Write-Host "  Removed: $dir"
+            $removed++
+        }
+    }
+    if ($removed -eq 0) { Write-Host '  Nothing to clean.' }
+    else { Write-Host "Cleaned $removed director$(if ($removed -eq 1){'y'}else{'ies'}). Conan package cache (C:\c2) preserved." -ForegroundColor Green }
+}
+
+function Wait-ForDevice([string]$Adb, [int]$Seconds) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    $printedProgress = $false
+    while ($true) {
+        $found = @(& $Adb devices | Select-Object -Skip 1 | ForEach-Object {
+            if ($_ -match '^(\S+)\s+device$') { $Matches[1] }
+        } | Where-Object { $_ })
+        if ($found.Count -gt 0) {
+            if ($printedProgress) { Write-Host '' }
+            return $found
+        }
+        if ((Get-Date) -ge $deadline) {
+            if ($printedProgress) { Write-Host '' }
+            return @()
+        }
+        $remaining = [int]($deadline - (Get-Date)).TotalSeconds
+        Write-Host "`r  No device — enable USB debugging, connect and unlock. Retrying... ${remaining}s " -NoNewline
+        $printedProgress = $true
+        Start-Sleep -Seconds 2
+    }
+}
+
+function Install-AndLaunch([string]$Adb, [string]$Apk, [string]$Serial) {
+    Step 'Installing debug APK'
+    & $Adb -s $Serial install -r $Apk
+    if ($LASTEXITCODE -ne 0) { Fail 'ADB install failed.' }
+    if ($SkipLaunch) { return }
+
+    Step 'Launching and verifying app process'
+    & $Adb -s $Serial shell am force-stop $AppId | Out-Null
+    & $Adb -s $Serial shell am start -W -n "$AppId/$Activity"
+    if ($LASTEXITCODE -ne 0) { Fail 'ADB launch failed.' }
+    Start-Sleep -Seconds 1
+    $pid = (& $Adb -s $Serial shell pidof $AppId).Trim()
+    if (-not $pid) { Fail 'App was installed but is not running after launch.' }
+    Write-Host "`nSUCCESS — app is running on $Serial (PID $pid)." -ForegroundColor Green
+    Write-Host 'Present a DESFire card to run the read-only Quick Check.' -ForegroundColor Green
+}
+
 try {
+    # Tee all output to a timestamped log file in .tools/ for post-mortem analysis.
+    $logDir = Join-Path $Root '.tools'
+    New-Item -ItemType Directory -Force $logDir | Out-Null
+    $logFile = Join-Path $logDir "build-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').log"
+    Start-Transcript -Path $logFile -NoClobber | Out-Null
+    Write-Host "Logging to: $logFile"
+    Get-ChildItem $logDir -Filter 'build-*.log' |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # Interactive menu when no arguments are provided.
+    if ($PSBoundParameters.Count -eq 0) {
+        Write-Host ''
+        Write-Host '  Build and deploy DESFire NFC app' -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host '  [1]  Full build + test + install + launch  (requires connected device)'
+        Write-Host '  [2]  Full build + test only                (no device required)'
+        Write-Host '  [3]  Install existing APK + launch         (skip build, requires device)'
+        Write-Host '  [4]  Clean artifacts, then full build      (preserves Conan cache in C:\c2)'
+        Write-Host '  [Q]  Quit'
+        Write-Host ''
+        $choice = (Read-Host '  Select [1-4] or Q').Trim().ToUpper()
+        Write-Host ''
+        switch ($choice) {
+            '1' { }
+            '2' { $SkipDeploy  = $true }
+            '3' { $InstallOnly = $true }
+            '4' { $Clean       = $true }
+            { $_ -in @('Q', '') } { Write-Host 'Cancelled.'; Stop-Transcript | Out-Null; exit 0 }
+            default { Fail "Invalid choice: '$choice'" }
+        }
+    }
+
+    # -InstallOnly: skip prerequisites and build entirely; find the APK and deploy it.
+    if ($InstallOnly) {
+        $sdk = Get-SdkRoot
+        $adb = Join-Path $sdk 'platform-tools\adb.exe'
+        if (-not (Test-Path $adb)) {
+            Fail "ADB not found at $adb.`nRun: sdkmanager 'platform-tools'"
+        }
+
+        $apk = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
+        if (-not (Test-Path $apk)) {
+            Fail "No APK found at:`n  $apk`nRun build-and-deploy.bat without -InstallOnly to build it first."
+        }
+
+        $apkTime = (Get-Item $apk).LastWriteTime
+        Write-Host "APK: $apk  ($($apkTime.ToString('yyyy-MM-dd HH:mm')))"
+
+        $srcRoots = @('app','core-card','core-execution','core-project','core-usecase','rfidgear-runtime') |
+            ForEach-Object { Join-Path $Root "$_\src" } | Where-Object { Test-Path $_ }
+        $newerFile = $null
+        foreach ($srcRoot in $srcRoots) {
+            $newerFile = Get-ChildItem $srcRoot -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -gt $apkTime } | Select-Object -First 1
+            if ($newerFile) { break }
+        }
+        if ($newerFile) {
+            Write-Host 'WARNING: APK may be stale — source file is newer:' -ForegroundColor Yellow
+            Write-Host "  $($newerFile.FullName) ($($newerFile.LastWriteTime.ToString('yyyy-MM-dd HH:mm')))" -ForegroundColor Yellow
+            Write-Host '  Consider running a full build instead of -InstallOnly.' -ForegroundColor Yellow
+        }
+
+        if ($SkipDeploy) { Stop-Transcript | Out-Null; exit 0 }
+
+        Step 'Checking connected physical device'
+        & $adb start-server | Out-Null
+        $devices = Wait-ForDevice $adb $DeviceWaitSeconds
+        if ($devices.Count -eq 0) {
+            Fail "No authorized device found after ${DeviceWaitSeconds}s.`nEnable Developer options + USB debugging, connect the phone and accept its RSA fingerprint prompt."
+        }
+        if ($devices.Count -gt 1) { Fail "Multiple devices connected: $($devices -join ', ')" }
+        $serial = $devices[0]
+        $abi = (& $adb -s $serial shell getprop ro.product.cpu.abi).Trim()
+        Write-Host "Device: $serial ($abi)"
+        if ($abi -ne 'arm64-v8a') { Fail "Device ABI '$abi' is not supported; build is arm64-v8a only." }
+
+        Install-AndLaunch $adb $apk $serial
+        Stop-Transcript | Out-Null
+        exit 0
+    }
+
+    # Warn on fresh machines where winget may be absent, before any Ensure-* calls need it.
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        Write-Host ''
+        Write-Host 'NOTE: winget (Windows Package Manager) not found.' -ForegroundColor Yellow
+        Write-Host 'The script cannot auto-install missing prerequisites without it.' -ForegroundColor Yellow
+        Write-Host 'Install "App Installer" from the Microsoft Store, or visit https://aka.ms/getwinget' -ForegroundColor Yellow
+        Write-Host 'Alternatively, install the following manually and re-run:' -ForegroundColor Yellow
+        Write-Host '  JDK 17          https://adoptium.net' -ForegroundColor Yellow
+        Write-Host '  Git             https://git-scm.com' -ForegroundColor Yellow
+        Write-Host '  Python 3.12     https://python.org/downloads' -ForegroundColor Yellow
+        Write-Host '  Android Studio  https://developer.android.com/studio  (includes SDK, NDK, CMake)' -ForegroundColor Yellow
+        Write-Host ''
+    }
+
     Step 'Checking prerequisites'
     Ensure-Java
     $sdk = Get-SdkRoot
     Write-Host "ANDROID_HOME=$sdk"
     Ensure-AndroidSdk $sdk
 
-    $git = Ensure-Git
+    # Verify sdkmanager actually installed the exact packages we need.
+    # sdkmanager exits 0 even if individual packages fail.
+    $ndkPath = Join-Path $sdk "ndk\$NdkVersion"
+    if (-not (Test-Path $ndkPath)) {
+        Fail "NDK $NdkVersion not found at:`n  $ndkPath`nRun: sdkmanager `"ndk;$NdkVersion`""
+    }
+    $cmakeExe = Join-Path $sdk "cmake\$CMakeVersion\bin\cmake.exe"
+    if (-not (Test-Path $cmakeExe)) {
+        Fail "CMake $CMakeVersion not found at:`n  $cmakeExe`nRun: sdkmanager `"cmake;$CMakeVersion`""
+    }
+    $adb = Join-Path $sdk 'platform-tools\adb.exe'
+    if (-not (Test-Path $adb)) {
+        Fail "ADB not found at:`n  $adb`nRun: sdkmanager `"platform-tools`""
+    }
+
+    $git    = Ensure-Git
     $python = Ensure-Python
 
     # Use a short Conan home path to avoid the Windows command-line length limit
@@ -647,10 +821,24 @@ try {
     # C:\c2 keeps each entry short enough to fit within the limit.
     $env:CONAN_HOME = 'C:\c2'
 
-    $conan = Ensure-Conan $python
-    Prepare-LibLogicalAccess $sdk $git $conan
-
+    $conan  = Ensure-Conan $python
     $gradle = Ensure-Gradle
+
+    Write-Host ''
+    Write-Host '==> Prerequisites OK' -ForegroundColor Green
+    Write-Host "  Java        : $env:JAVA_HOME"
+    Write-Host "  Android SDK : $sdk"
+    Write-Host "  NDK         : $NdkVersion"
+    Write-Host "  CMake       : $CMakeVersion"
+    Write-Host "  ADB         : $adb"
+    Write-Host "  Git         : $git"
+    Write-Host "  Python      : $python"
+    Write-Host "  Conan       : $ConanVersion (project-local venv)"
+    Write-Host "  Gradle      : $GradleVersion"
+
+    if ($Clean) { Remove-BuildArtifacts }
+
+    Prepare-LibLogicalAccess $sdk $git $conan
 
     Step 'Running RFIDGear project/runtime tests and building app-debug.apk'
     Push-Location $Root
@@ -662,18 +850,13 @@ try {
     $apk = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
     if (-not (Test-Path $apk)) { Fail "APK not found: $apk" }
     Write-Host "Built and unit-tested: $apk" -ForegroundColor Green
-    if ($SkipDeploy) { exit 0 }
+    if ($SkipDeploy) { Stop-Transcript | Out-Null; exit 0 }
 
-    $adb = Join-Path $sdk 'platform-tools\adb.exe'
     Step 'Checking connected physical device'
     & $adb start-server | Out-Null
-    $devices = @(& $adb devices | Select-Object -Skip 1 | ForEach-Object {
-        if ($_ -match '^(\S+)\s+device$') { $Matches[1] }
-    } | Where-Object { $_ })
-
+    $devices = Wait-ForDevice $adb $DeviceWaitSeconds
     if ($devices.Count -eq 0) {
-        Write-Host 'No authorized device found. Enable Developer options + USB debugging, connect/unlock the phone and accept its RSA prompt.' -ForegroundColor Yellow
-        exit 2
+        Fail "No authorized device found after ${DeviceWaitSeconds}s.`nEnable Developer options + USB debugging, connect the phone and accept its RSA fingerprint prompt."
     }
     if ($devices.Count -gt 1) { Fail "Multiple devices connected: $($devices -join ', ')" }
 
@@ -682,24 +865,12 @@ try {
     Write-Host "Device: $serial ($abi)"
     if ($abi -ne 'arm64-v8a') { Fail "Connected device ABI '$abi' is not supported; current app build is arm64-v8a only." }
 
-    Step 'Installing debug APK'
-    & $adb -s $serial install -r $apk
-    if ($LASTEXITCODE -ne 0) { Fail 'ADB install failed.' }
-    if ($SkipLaunch) { exit 0 }
-
-    Step 'Launching and verifying app process'
-    & $adb -s $serial shell am force-stop $AppId | Out-Null
-    & $adb -s $serial shell am start -W -n "$AppId/$Activity"
-    if ($LASTEXITCODE -ne 0) { Fail 'ADB launch failed.' }
-    Start-Sleep -Seconds 1
-    $appProcessId = (& $adb -s $serial shell pidof $AppId).Trim()
-    if (-not $appProcessId) { Fail 'App was installed but is not running after launch.' }
-
-    Write-Host "`nSUCCESS - tests passed and app is running on $serial (PID $appProcessId)." -ForegroundColor Green
-    Write-Host 'Present a DESFire card to run the read-only Quick Check.' -ForegroundColor Green
+    Install-AndLaunch $adb $apk $serial
+    Stop-Transcript | Out-Null
     exit 0
 }
 catch {
     Write-Host "`nERROR: $($_.Exception.Message)" -ForegroundColor Red
+    try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
