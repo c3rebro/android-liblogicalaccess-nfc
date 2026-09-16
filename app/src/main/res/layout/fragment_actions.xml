@@ -14,9 +14,9 @@
             android:layout_height="wrap_content"
             android:text="RFID ACTIONS"
             android:textStyle="bold"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:letterSpacing="0.1"
-            android:textColor="?attr/colorPrimary"
+            android:textColor="@color/brand_blue_text"
             android:layout_marginBottom="8dp" />
 
         <Button
@@ -27,6 +27,8 @@
 
         <Button
             android:id="@+id/selectFormatUseCase"
+            android:backgroundTint="?attr/colorError"
+            android:textColor="?attr/colorOnError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -34,6 +36,8 @@
 
         <Button
             android:id="@+id/selectFactoryResetUseCase"
+            android:backgroundTint="?attr/colorError"
+            android:textColor="?attr/colorOnError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -45,6 +49,11 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="Active use case: DESFire Quick Check"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:textColor="?attr/colorOnPrimary"
+            android:background="?attr/colorPrimary"
+            android:padding="12dp"
             android:textIsSelectable="true" />
 
         <TextView
@@ -68,9 +77,9 @@
             android:layout_height="wrap_content"
             android:text="PROJECT"
             android:textStyle="bold"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:letterSpacing="0.1"
-            android:textColor="?attr/colorPrimary"
+            android:textColor="@color/brand_blue_text"
             android:layout_marginBottom="8dp" />
 
         <Button

@@ -1,5 +1,12 @@
 <resources>
     <style name="Theme.App" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowActionModeOverlay">true</item>
+        <item name="colorPrimary">@color/brand_blue</item>
+        <item name="colorPrimaryVariant">@color/brand_blue_dark</item>
+        <item name="colorPrimaryDark">@color/brand_blue_dark</item>
+        <item name="colorSecondary">@color/brand_blue_text</item>
+        <item name="colorSecondaryVariant">@color/brand_blue_dark</item>
+        <item name="colorOnPrimary">@color/brand_blue_on_primary</item>
+        <item name="colorOnSecondary">@android:color/white</item>
     </style>
 </resources>

@@ -80,7 +80,7 @@ When a DESFire/ISO-DEP tag is presented, the app keeps one NFC session open and 
 - file IDs;
 - file type, size, communication mode and access rights.
 
-Public metadata is always attempted first. If application/file metadata requires authentication, configured AID-specific keys are tried before global defaults. AID-specific keys can be added from the Android UI; they are currently session-only and are never shown again as plaintext after entry.
+Public metadata is always attempted first. If application/file metadata requires authentication, configured AID-specific keys are tried before global defaults. AID-specific keys can be added from the Android UI; they are session-only unless permanent storage is explicitly selected and are never shown again as plaintext after entry.
 
 The report distinguishes `PUBLIC`, `AUTHENTICATED`, `KEY_REQUIRED`, `DENIED` and `UNAVAILABLE` access states. The latest result can be exported as a PDF using Android's system document picker. The export model contains no raw DESFire key bytes. See [`docs/DESFIRE_QUICK_CHECK.md`](docs/DESFIRE_QUICK_CHECK.md) and [`docs/REPORTING.md`](docs/REPORTING.md).
 
@@ -158,6 +158,6 @@ The JNI/liblogicalaccess Android path is implemented in source, but the first Wi
 
 This is an encoding tool, so project files and keys are security-sensitive inputs. The runtime treats project XML as untrusted, limits ZIP/XML sizes, disables external XML entities, avoids logging secret fields and keeps card keys out of report text/PDF models.
 
-Quick Check keys are currently session-only. Persistent key storage, if added later, must use Android Keystore-backed encryption; raw DESFire keys must not be stored as plaintext preferences or hard-coded into the APK.
+Quick Check keys are session-only by default and survive rotation. Both key dialogs offer explicit permanent storage with a warning that saving keys is not recommended. Saved keys use AES-GCM encryption with an Android Keystore wrapping key; raw keys are never stored in plaintext preferences. Scan history and the selected action survive navigation, rotation and app restarts. Results offer confirmed history clearing and individual or combined PDF exports, with card results separated from reader/environment details.
 
 The DESFire factory default zero key is a public protocol default rather than a secret and is generated as fresh in-memory key material when needed; caller-provided current PICC keys remain secret and must never be logged or persisted in plaintext.

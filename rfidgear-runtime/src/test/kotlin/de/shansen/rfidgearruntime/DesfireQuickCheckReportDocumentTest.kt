@@ -98,6 +98,15 @@ class DesfireQuickCheckReportDocumentTest {
         assertTrue(text.contains("RW=NEVER"))
         assertFalse(text.contains(rawKeyHex))
         assertFalse(text.contains(rawKeyHex.lowercase()))
+        val cardOnly = DesfireQuickCheckTextRenderer.lines(document, includeReaderDetails = false).joinToString("\n")
+        assertTrue(cardOnly.contains("AID 0x123456"))
+        assertTrue(cardOnly.contains("R=KEY1"))
+        assertFalse(cardOnly.contains("Backend:"))
+        assertFalse(cardOnly.contains("NFC technologies:"))
+        assertFalse(cardOnly.contains("Max transceive:"))
+        assertFalse(cardOnly.contains("Native bridge:"))
+        assertFalse(cardOnly.contains(rawKeyHex))
+        assertTrue(text.contains("NFC technologies: IsoDep, NfcA"))
     }
 
     @Test

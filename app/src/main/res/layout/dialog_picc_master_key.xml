@@ -25,13 +25,20 @@
         android:layout_marginTop="8dp"
         android:fontFamily="monospace"
         android:hint="Key in hexadecimal (key #0, PICC level)"
-        android:inputType="textNoSuggestions"
+        android:inputType="textPassword"
+        android:saveEnabled="false"
         android:maxLines="2" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="The PICC master key is key #0 at application ID 0x000000. Required for Format and Factory Reset. Session-only."
+        android:text="The PICC master key is key #0 at application ID 0x000000. Required for Format and Factory Reset. Session-only unless permanent saving is selected."
         android:textSize="12sp" />
+    <CheckBox android:id="@+id/savePermanently" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:text="Save key permanently on this device"
+        android:checked="false" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Permanent key storage is not recommended. Saved keys are encrypted on this device, but keeping keys only for the session is safer."
+        android:textSize="12sp" android:textColor="?attr/colorError" />
 </LinearLayout>

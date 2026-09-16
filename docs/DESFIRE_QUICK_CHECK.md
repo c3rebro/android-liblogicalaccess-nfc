@@ -68,15 +68,23 @@ The runtime validates exact key sizes:
 
 The key object's `toString()` never emits the secret bytes.
 
+## Card-family identification
+
+ISO-DEP support alone does not identify DESFire. RFIDGear checks the read-only GetVersion hardware product family before starting any DESFire action (NXP AN10833), supports wrapped and native Plus response framing, and recognizes legacy Plus S/X/SE historical-byte signatures. An unidentified ISO-DEP card is recorded as unconfirmed rather than DESFire. DESFire Light is identified separately; the current DESFire actions do not support it.
+
+Non-ISO-DEP cards are recorded with UID, activation metadata, Android technology list and an explicit capability message. Android's Classic/Ultralight APIs, when exposed for that card, indicate phone support; RFIDGear currently implements neither family's memory read/write flow. Classic-compatible identification can also mean Plus in SL1, so it is not presented as an exact chip-family identification.
+
+References: [NXP AN10833](https://www.nxp.com/docs/en/application-note/AN10833.pdf), [Android NFC technologies](https://developer.android.com/develop/connectivity/nfc/advanced-nfc).
+
 ## Android key UI
 
 The app supports adding an application-specific Quick Check key by AID.
 The UI accepts decimal or `0x`-prefixed AIDs and common key separators.
 
-Keys are currently **session-only**:
+Keys are **session-only by default**:
 
 - they are kept in memory;
-- they are not written to SharedPreferences or project files;
+- they survive orientation changes but are discarded when the app session ends;
 - key values are not displayed again after adding them;
 - clearing session keys overwrites the current in-memory key byte arrays before dropping the configuration.
 
@@ -91,7 +99,7 @@ scan card
   -> next Quick Check retries the AID-specific key before global defaults
 ```
 
-Persistent key storage, if added later, must be implemented separately with Android Keystore-backed encryption. Raw DESFire keys must not be persisted as plaintext preferences.
+Both key dialogs have an unchecked permanent-storage option and warn that permanent storage is not recommended. Opted-in keys are encrypted using AES-GCM with an Android Keystore wrapping key. Only ciphertext and the IV reach private preferences; project files and reports never contain raw keys. Clearing application keys also deletes saved application keys. Clearing the PICC key deletes its saved copy.
 
 ## CardBackend primitives used by Quick Check
 

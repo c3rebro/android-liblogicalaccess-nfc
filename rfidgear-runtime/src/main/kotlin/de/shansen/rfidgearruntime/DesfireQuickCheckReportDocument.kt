@@ -162,7 +162,7 @@ object DesfireQuickCheckReportDocumentFactory {
 object DesfireQuickCheckTextRenderer {
     fun render(document: DesfireQuickCheckReportDocument): String = lines(document).joinToString("\n")
 
-    fun lines(document: DesfireQuickCheckReportDocument): List<String> = buildList {
+    fun lines(document: DesfireQuickCheckReportDocument, includeReaderDetails: Boolean = true): List<String> = buildList {
         add("DESFire Quick Check Report")
         add("READ ONLY")
         document.generatedAt?.let { add("Generated: $it") }
@@ -170,7 +170,7 @@ object DesfireQuickCheckTextRenderer {
         add("Card")
         add("UID: ${document.card.uid.ifBlank { "unknown" }}")
         add("Technology: ${document.card.technology}")
-        document.card.detail?.let { add("Backend: $it") }
+        if (includeReaderDetails) document.card.detail?.let { add("Backend: $it") }
         document.card.hardwareVersion?.let { add("Hardware version: $it") }
         document.card.softwareVersion?.let { add("Software version: $it") }
         document.card.storageCode?.let { add("Storage code: 0x%02X".format(it)) }
@@ -178,9 +178,9 @@ object DesfireQuickCheckTextRenderer {
         document.card.productionYear?.let { add("Production year: $it") }
         document.card.freeMemoryBytes?.let { add("Free memory: $it bytes") }
 
-        if (document.environment.nfcTechnologies.isNotEmpty() ||
+        if (includeReaderDetails && (document.environment.nfcTechnologies.isNotEmpty() ||
             document.environment.maxTransceiveLength != null ||
-            document.environment.backendVersion != null
+            document.environment.backendVersion != null)
         ) {
             add("")
             add("Environment")

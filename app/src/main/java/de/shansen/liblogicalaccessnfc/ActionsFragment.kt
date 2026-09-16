@@ -66,6 +66,11 @@ class ActionsFragment : Fragment() {
     fun updateUseCaseSummary() {
         val main = activity as? MainActivity ?: return
         val b = _binding ?: return
+        val destructive = main.activeScanUseCase != MainActivity.ActiveScanUseCase.QUICK_CHECK
+        b.activeUseCaseSummary.setBackgroundColor(com.google.android.material.color.MaterialColors.getColor(
+            b.activeUseCaseSummary, if (destructive) com.google.android.material.R.attr.colorError else com.google.android.material.R.attr.colorPrimary))
+        b.activeUseCaseSummary.setTextColor(com.google.android.material.color.MaterialColors.getColor(
+            b.activeUseCaseSummary, if (destructive) com.google.android.material.R.attr.colorOnError else com.google.android.material.R.attr.colorOnPrimary))
         b.activeUseCaseSummary.text = when (main.activeScanUseCase) {
             MainActivity.ActiveScanUseCase.QUICK_CHECK ->
                 "Active: ${BuiltInUseCaseCatalog.desfireQuickCheck.title} [READ ONLY]"
