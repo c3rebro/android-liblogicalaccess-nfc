@@ -40,7 +40,7 @@
                 android:paddingEnd="10dp"
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp"
-                android:textSize="13sp"
+                android:textSize="15sp"
                 android:typeface="monospace" />
 
         </LinearLayout>
@@ -134,6 +134,7 @@
             android:layout_marginTop="12dp"
             android:text="No .rfPrj project loaded."
             android:textIsSelectable="true"
+            android:textSize="15sp"
             android:typeface="monospace" />
 
     </LinearLayout>

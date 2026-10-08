@@ -21,7 +21,7 @@
         android:textColor="@color/brand_amber_on"
         android:padding="10dp"
         android:gravity="center"
-        android:textSize="12sp"
+        android:textSize="15sp"
         android:textStyle="bold"
         android:text="⚠  AUTORUN ACTIVE" />
 

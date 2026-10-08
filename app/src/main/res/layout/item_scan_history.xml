@@ -37,13 +37,13 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textStyle="bold"
-                    android:textSize="14sp" />
+                    android:textSize="15sp" />
 
                 <TextView
                     android:id="@+id/headerSubtitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="12sp"
+                    android:textSize="15sp"
                     android:alpha="0.7" />
 
             </LinearLayout>
@@ -82,15 +82,15 @@
                 android:layout_height="wrap_content"
                 android:textIsSelectable="true"
                 android:typeface="monospace"
-                android:textSize="12sp" />
+                android:textSize="15sp" />
 
             <LinearLayout android:id="@+id/environmentSection" android:layout_width="match_parent"
                 android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginTop="16dp">
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:text="READER / ENVIRONMENT" android:textStyle="bold" android:textSize="14sp"
+                    android:text="READER / ENVIRONMENT" android:textStyle="bold" android:textSize="15sp"
                     android:textColor="@color/brand_blue_text" />
                 <TextView android:id="@+id/environmentDetails" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:textSize="12sp" android:typeface="monospace"
+                    android:layout_height="wrap_content" android:textSize="15sp" android:typeface="monospace"
                     android:textIsSelectable="true" />
             </LinearLayout>
 

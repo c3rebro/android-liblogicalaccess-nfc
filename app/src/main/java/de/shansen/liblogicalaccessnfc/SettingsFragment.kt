@@ -1,9 +1,13 @@
 package de.shansen.liblogicalaccessnfc
 
 import android.os.Bundle
+import android.text.Editable
+import android.text.InputFilter
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
@@ -67,6 +71,8 @@ class SettingsFragment : Fragment() {
             append("Native bridge: ${NativeBridge.version()}")
         }
 
+        binding.exportLog.setOnClickListener { main.exportLog() }
+
         updateKeySummaries()
     }
 
@@ -91,6 +97,29 @@ class SettingsFragment : Fragment() {
             android.R.layout.simple_spinner_dropdown_item,
             keyTypes.map { keyTypeLabel(it) }
         )
+
+        val hexFilter = InputFilter { source, _, _, _, _, _ ->
+            val filtered = source.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
+            if (filtered.length == source.length) null else filtered.toString()
+        }
+        fun updateHexCounter() {
+            val max = if (keyTypes[dialogBinding.keyType.selectedItemPosition] == DesfireKeyType.TDES_3K) 48 else 32
+            val len = dialogBinding.keyHex.text.length
+            dialogBinding.keyHex.filters = arrayOf(hexFilter, InputFilter.LengthFilter(max))
+            dialogBinding.hexCounter.text = "$len / $max hex chars"
+            dialogBinding.hexCounter.setTypeface(null,
+                if (len == max) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
+        updateHexCounter()
+        dialogBinding.keyHex.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) { updateHexCounter() }
+        })
+        dialogBinding.keyType.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) { updateHexCounter() }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
 
         val dialog = AlertDialog.Builder(requireContext())
             .setTitle("PICC master key")

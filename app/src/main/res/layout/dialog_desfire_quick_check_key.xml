@@ -42,20 +42,30 @@
         android:layout_marginTop="8dp"
         android:fontFamily="monospace"
         android:hint="Key in hexadecimal"
-        android:inputType="textPassword"
+        android:inputType="textVisiblePassword"
         android:saveEnabled="false"
         android:maxLines="2" />
+
+    <TextView
+        android:id="@+id/hexCounter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textAlignment="textEnd"
+        android:textSize="14sp"
+        android:fontFamily="monospace"
+        android:text="0 / 32 hex chars" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:text="The key is session-only by default and is not displayed again after entry."
-        android:textSize="12sp" />
+        android:textSize="15sp" />
     <CheckBox android:id="@+id/savePermanently" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:text="Save key permanently on this device"
         android:checked="false" />
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="Permanent key storage is not recommended. Saved keys are encrypted on this device, but keeping keys only for the session is safer."
-        android:textSize="12sp" android:textColor="?attr/colorError" />
+        android:textSize="15sp" android:textColor="?attr/colorError" />
 </LinearLayout>

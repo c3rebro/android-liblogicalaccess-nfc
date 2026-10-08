@@ -1,8 +1,12 @@
 package de.shansen.liblogicalaccessnfc
 
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.text.SpannableStringBuilder
+import android.text.style.ReplacementSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -101,7 +105,13 @@ class ActionsFragment : Fragment() {
         )
         buttonDefs.forEach { (useCase, pair) ->
             val (button, label) = pair
-            button.text = if (useCase == main.activeScanUseCase) "▶  $label" else label
+            if (useCase == main.activeScanUseCase) {
+                val span = SpannableStringBuilder("▶  $label")
+                span.setSpan(ScaledCharSpan(1.6f), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                button.text = span
+            } else {
+                button.text = label
+            }
         }
     }
 
@@ -193,5 +203,26 @@ class ActionsFragment : Fragment() {
             if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
         }
         return uri.lastPathSegment
+    }
+
+    /** Draws a single character at [scale]× its normal size, centered in the line slot,
+     *  without modifying line metrics so the surrounding text baseline is unaffected. */
+    private class ScaledCharSpan(private val scale: Float) : ReplacementSpan() {
+        override fun getSize(paint: Paint, text: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+            val orig = paint.textSize
+            paint.textSize = orig * scale
+            val w = paint.measureText(text, start, end).toInt()
+            paint.textSize = orig
+            return w
+        }
+        override fun draw(canvas: Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+            val orig = paint.textSize
+            paint.textSize = orig * scale
+            val fm = paint.fontMetrics
+            val mid = (top + bottom) / 2f
+            val drawY = mid - (fm.ascent + fm.descent) / 2f
+            canvas.drawText(text ?: "", start, end, x, drawY, paint)
+            paint.textSize = orig
+        }
     }
 }
