@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import de.shansen.liblogicalaccessnfc.databinding.FragmentActionsBinding
 import de.shansen.rfidgearruntime.RfidGearAction
@@ -41,6 +42,9 @@ class ActionsFragment : Fragment() {
         binding.selectQuickCheckUseCase.setOnClickListener {
             main.selectQuickCheckUseCase()
         }
+        binding.selectRestoreTransportUseCase.setOnClickListener {
+            main.selectRestoreTransportUseCase()
+        }
         binding.selectFormatUseCase.setOnClickListener {
             main.selectFormatUseCase()
         }
@@ -66,18 +70,38 @@ class ActionsFragment : Fragment() {
     fun updateUseCaseSummary() {
         val main = activity as? MainActivity ?: return
         val b = _binding ?: return
-        val destructive = main.activeScanUseCase != MainActivity.ActiveScanUseCase.QUICK_CHECK
-        b.activeUseCaseSummary.setBackgroundColor(com.google.android.material.color.MaterialColors.getColor(
-            b.activeUseCaseSummary, if (destructive) com.google.android.material.R.attr.colorError else com.google.android.material.R.attr.colorPrimary))
-        b.activeUseCaseSummary.setTextColor(com.google.android.material.color.MaterialColors.getColor(
-            b.activeUseCaseSummary, if (destructive) com.google.android.material.R.attr.colorOnError else com.google.android.material.R.attr.colorOnPrimary))
-        b.activeUseCaseSummary.text = when (main.activeScanUseCase) {
+        val ctx = context ?: return
+
+        val errorColor = com.google.android.material.color.MaterialColors.getColor(
+            b.activeUseCaseAccent, com.google.android.material.R.attr.colorError)
+        val (accentColor, summaryText) = when (main.activeScanUseCase) {
             MainActivity.ActiveScanUseCase.QUICK_CHECK ->
-                "Active: ${BuiltInUseCaseCatalog.desfireQuickCheck.title} [READ ONLY]"
+                ContextCompat.getColor(ctx, R.color.brand_blue) to
+                    "Quick Check  —  read-only"
+            MainActivity.ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG ->
+                ContextCompat.getColor(ctx, R.color.brand_amber) to
+                    "Restore Transport Config  —  write (non-destructive)"
             MainActivity.ActiveScanUseCase.FORMAT ->
-                "Active: ${BuiltInUseCaseCatalog.desfireFormat.title} [DESTRUCTIVE]"
+                errorColor to "Format DESFire card  —  DESTRUCTIVE"
             MainActivity.ActiveScanUseCase.FACTORY_RESET ->
-                "Active: ${BuiltInUseCaseCatalog.desfireFactoryReset.title} [DESTRUCTIVE]"
+                errorColor to "Factory Reset DESFire card  —  DESTRUCTIVE"
+        }
+        b.activeUseCaseAccent.setBackgroundColor(accentColor)
+        b.activeUseCaseSummary.text = summaryText
+
+        val buttonDefs = listOf(
+            MainActivity.ActiveScanUseCase.QUICK_CHECK to
+                (b.selectQuickCheckUseCase to "Quick Check (read only)"),
+            MainActivity.ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG to
+                (b.selectRestoreTransportUseCase to "Restore PICC transport config"),
+            MainActivity.ActiveScanUseCase.FORMAT to
+                (b.selectFormatUseCase to "Format DESFire card (destructive)"),
+            MainActivity.ActiveScanUseCase.FACTORY_RESET to
+                (b.selectFactoryResetUseCase to "Factory Reset DESFire card (destructive)")
+        )
+        buttonDefs.forEach { (useCase, pair) ->
+            val (button, label) = pair
+            button.text = if (useCase == main.activeScanUseCase) "▶  $label" else label
         }
     }
 

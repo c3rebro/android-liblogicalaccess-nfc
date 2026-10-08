@@ -45,6 +45,22 @@ class SettingsFragment : Fragment() {
             main.clearPiccKey()
             updateKeySummaries()
         }
+        binding.autorunSwitch.isChecked = main.autorunEnabled
+        binding.autorunSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                val warning = main.checkAutorunReadiness()
+                if (warning != null) {
+                    android.widget.Toast.makeText(requireContext(), warning, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            main.applyAutorun(isChecked)
+        }
+
+        binding.soundSwitch.isChecked = main.soundEnabled
+        binding.soundSwitch.setOnCheckedChangeListener { _, isChecked ->
+            main.soundEnabled = isChecked
+        }
+
         binding.versionInfo.text = buildString {
             appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Commit: ${BuildConfig.GIT_COMMIT}")

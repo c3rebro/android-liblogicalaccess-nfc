@@ -12,6 +12,49 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:text="Welcome to RFIDGear"
+            android:textStyle="bold"
+            android:textSize="22sp"
+            android:textColor="@color/brand_blue"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Selected action indicator: left accent bar + label -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <View
+                android:id="@+id/activeUseCaseAccent"
+                android:layout_width="4dp"
+                android:layout_height="match_parent"
+                android:background="?attr/colorPrimary" />
+
+            <TextView
+                android:id="@+id/activeUseCaseSummary"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textSize="13sp"
+                android:typeface="monospace" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginBottom="16dp"
+            android:background="?attr/colorControlNormal"
+            android:alpha="0.2" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:text="RFID ACTIONS"
             android:textStyle="bold"
             android:textSize="16sp"
@@ -24,6 +67,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Quick Check (read only)" />
+
+        <Button
+            android:id="@+id/selectRestoreTransportUseCase"
+            android:backgroundTint="@color/brand_amber"
+            android:textColor="@color/brand_amber_on"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Restore PICC transport config" />
 
         <Button
             android:id="@+id/selectFormatUseCase"
@@ -42,19 +94,6 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="Factory Reset DESFire card (destructive)" />
-
-        <TextView
-            android:id="@+id/activeUseCaseSummary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Active use case: DESFire Quick Check"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:textColor="?attr/colorOnPrimary"
-            android:background="?attr/colorPrimary"
-            android:padding="12dp"
-            android:textIsSelectable="true" />
 
         <TextView
             android:id="@+id/nfcStatus"

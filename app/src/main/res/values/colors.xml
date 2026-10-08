@@ -5,4 +5,6 @@
     <color name="brand_blue_dark">#1164A0</color>
     <color name="brand_blue_text">#1164A0</color>
     <color name="brand_blue_on_primary">#071B2A</color>
+    <color name="brand_amber">#F57C00</color>
+    <color name="brand_amber_on">#FFFFFF</color>
 </resources>

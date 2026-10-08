@@ -1,5 +1,7 @@
 package de.shansen.liblogicalaccessnfc
 
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
@@ -8,11 +10,13 @@ import android.nfc.tech.MifareUltralight
 import android.nfc.tech.NfcA
 import de.shansen.rfcard.MifareIdentification
 import android.os.Bundle
+import android.view.View
 import android.widget.ArrayAdapter
 import androidx.lifecycle.ViewModelProvider
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -20,6 +24,7 @@ import androidx.core.view.updatePadding
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
 import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
 import de.shansen.rfcard.DesfireAuthenticate
+import de.shansen.rfcard.DesfireChangePiccMasterKey
 import de.shansen.rfcard.DesfireFactoryDefaults
 import de.shansen.rfcard.DesfireKey
 import de.shansen.rfcard.DesfireKeyType
@@ -41,7 +46,7 @@ import java.util.concurrent.CompletableFuture
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     enum class ActiveScanUseCase {
-        QUICK_CHECK, FORMAT, FACTORY_RESET
+        QUICK_CHECK, RESTORE_TRANSPORT_CONFIG, FORMAT, FACTORY_RESET
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -74,6 +79,14 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             field = value
             preferences.edit().putString("active-action", value.name).apply()
         }
+
+    var autorunEnabled: Boolean
+        get() = preferences.getBoolean("autorun-enabled", false)
+        set(value) { preferences.edit().putBoolean("autorun-enabled", value).apply() }
+
+    var soundEnabled: Boolean
+        get() = preferences.getBoolean("sound-enabled", false)
+        set(value) { preferences.edit().putBoolean("sound-enabled", value).apply() }
 
     private lateinit var actionsFragment: ActionsFragment
     private lateinit var resultsFragment: ResultsFragment
@@ -158,6 +171,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
         binding.bottomNav.selectedItemId = preferences.getInt("selected-menu", R.id.nav_actions)
         actionsFragment.updateUseCaseSummary()
+        updateAutorunWarning()
 
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
         val nfcStatus = when {
@@ -205,19 +219,84 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     fun selectQuickCheckUseCase() {
         activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
         actionsFragment.updateUseCaseSummary()
+        updateAutorunWarning()
         actionsFragment.updateStatus("Quick Check selected. Hold a DESFire card near the phone.")
+    }
+
+    fun selectRestoreTransportUseCase() {
+        activeScanUseCase = ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG
+        actionsFragment.updateUseCaseSummary()
+        updateAutorunWarning()
+        actionsFragment.updateStatus("Restore Transport Config selected. Present the DESFire card.")
     }
 
     fun selectFormatUseCase() {
         activeScanUseCase = ActiveScanUseCase.FORMAT
         actionsFragment.updateUseCaseSummary()
+        updateAutorunWarning()
         actionsFragment.updateStatus("Format selected. Present the DESFire card — a confirmation dialog will appear.")
     }
 
     fun selectFactoryResetUseCase() {
         activeScanUseCase = ActiveScanUseCase.FACTORY_RESET
         actionsFragment.updateUseCaseSummary()
+        updateAutorunWarning()
         actionsFragment.updateStatus("Factory Reset selected. Present the DESFire card — a confirmation dialog will appear.")
+    }
+
+    fun applyAutorun(enabled: Boolean) {
+        autorunEnabled = enabled
+        updateAutorunWarning()
+    }
+
+    fun checkAutorunReadiness(): String? = when (activeScanUseCase) {
+        ActiveScanUseCase.QUICK_CHECK -> null
+        ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG ->
+            if (piccMasterKey == null) "Restore Transport Config requires the current PICC master key. Set it in Settings → PICC Master Key." else null
+        ActiveScanUseCase.FORMAT, ActiveScanUseCase.FACTORY_RESET -> null
+    }
+
+    fun updateAutorunWarning() {
+        if (!autorunEnabled) {
+            binding.autorunWarning.visibility = View.GONE
+            return
+        }
+        val label = when (activeScanUseCase) {
+            ActiveScanUseCase.QUICK_CHECK -> "Quick Check (read-only)"
+            ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG -> "Restore PICC Transport Config (write)"
+            ActiveScanUseCase.FORMAT -> "Format DESFire card ⚠ DESTRUCTIVE"
+            ActiveScanUseCase.FACTORY_RESET -> "Factory Reset DESFire card ⚠ DESTRUCTIVE"
+        }
+        binding.autorunWarning.text = "⚠  AUTORUN: card contact will execute  $label"
+        binding.autorunWarning.visibility = View.VISIBLE
+    }
+
+    private fun playSuccessSound() {
+        if (!soundEnabled) return
+        Thread {
+            try {
+                ToneGenerator(AudioManager.STREAM_MUSIC, 80).apply {
+                    startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+                    Thread.sleep(250)
+                    startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+                    Thread.sleep(300)
+                    release()
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
+    private fun playFailureSound() {
+        if (!soundEnabled) return
+        Thread {
+            try {
+                ToneGenerator(AudioManager.STREAM_MUSIC, 80).apply {
+                    startTone(ToneGenerator.TONE_PROP_NACK, 400)
+                    Thread.sleep(500)
+                    release()
+                }
+            } catch (_: Exception) {}
+        }.start()
     }
 
     fun launchOpenProject() {
@@ -396,6 +475,17 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             val transport = AndroidIsoDepTransport(isoDep)
             NativeBridge.attachTransport(transport)
 
+            if (autorunEnabled) {
+                val readiness = checkAutorunReadiness()
+                if (readiness != null) {
+                    runOnUiThread {
+                        actionsFragment.updateStatus("Autorun blocked: $readiness")
+                        android.widget.Toast.makeText(this@MainActivity, readiness, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    return
+                }
+            }
+
             when (activeScanUseCase) {
                 ActiveScanUseCase.FORMAT -> {
                     runFormat(tag, uidText, techList)
@@ -403,6 +493,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 }
                 ActiveScanUseCase.FACTORY_RESET -> {
                     runFactoryReset(tag, uidText, techList)
+                    return
+                }
+                ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG -> {
+                    runRestoreTransportConfig(tag, uidText)
                     return
                 }
                 ActiveScanUseCase.QUICK_CHECK -> runQuickCheck(tag, isoDep, techList)
@@ -494,6 +588,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     "Quick Check partial — PICC key: $detectedPiccLabel. AID 0x%06X needs app key.".format(firstMissingKeyAid)
             })
 
+            if (reportError != null) playFailureSound() else playSuccessSound()
+
             if (firstMissingKeyAid != null && !isFinishing) {
                 showAddQuickCheckKeyDialog(firstMissingKeyAid)
             }
@@ -553,20 +649,24 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         val confirmed = CompletableFuture<Boolean>()
-        runOnUiThread {
-            if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
-            AlertDialog.Builder(this)
-                .setTitle("Format DESFire card?")
-                .setMessage(
-                    "UID: ${preflight.identity.uid.toHex()}\n\n" +
-                    "All applications and files will be permanently deleted.\n" +
-                    "This cannot be undone.\n\n" +
-                    "Keep the card in the NFC field."
-                )
-                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
-                .setPositiveButton("Format") { _, _ -> confirmed.complete(true) }
-                .setOnCancelListener { confirmed.complete(false) }
-                .show()
+        if (autorunEnabled) {
+            confirmed.complete(true)
+        } else {
+            runOnUiThread {
+                if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
+                AlertDialog.Builder(this)
+                    .setTitle("Format DESFire card?")
+                    .setMessage(
+                        "UID: ${preflight.identity.uid.toHex()}\n\n" +
+                        "All applications and files will be permanently deleted.\n" +
+                        "This cannot be undone.\n\n" +
+                        "Keep the card in the NFC field."
+                    )
+                    .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
+                    .setPositiveButton("Format") { _, _ -> confirmed.complete(true) }
+                    .setOnCancelListener { confirmed.complete(false) }
+                    .show()
+            }
         }
 
         if (!confirmed.get()) {
@@ -581,6 +681,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
         val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
         val result = formatUseCase.execute(NativeDesfireCardBackend(tag.id), authorization, currentKey)
+
+        if (result.verifiedSuccess) playSuccessSound() else playFailureSound()
 
         runOnUiThread {
             actionsFragment.updateUseCaseSummary()
@@ -624,21 +726,25 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         val confirmed = CompletableFuture<Boolean>()
-        runOnUiThread {
-            if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
-            AlertDialog.Builder(this)
-                .setTitle("Factory Reset DESFire card?")
-                .setMessage(
-                    "UID: ${preflight.identity.uid.toHex()}\n\n" +
-                    "All applications and files will be deleted.\n" +
-                    "PICC master key #0 will be reset to the DES zero key.\n" +
-                    "This cannot be undone.\n\n" +
-                    "Keep the card in the NFC field."
-                )
-                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
-                .setPositiveButton("Reset") { _, _ -> confirmed.complete(true) }
-                .setOnCancelListener { confirmed.complete(false) }
-                .show()
+        if (autorunEnabled) {
+            confirmed.complete(true)
+        } else {
+            runOnUiThread {
+                if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
+                AlertDialog.Builder(this)
+                    .setTitle("Factory Reset DESFire card?")
+                    .setMessage(
+                        "UID: ${preflight.identity.uid.toHex()}\n\n" +
+                        "All applications and files will be deleted.\n" +
+                        "PICC master key #0 will be reset to the DES zero key.\n" +
+                        "This cannot be undone.\n\n" +
+                        "Keep the card in the NFC field."
+                    )
+                    .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
+                    .setPositiveButton("Reset") { _, _ -> confirmed.complete(true) }
+                    .setOnCancelListener { confirmed.complete(false) }
+                    .show()
+            }
         }
 
         if (!confirmed.get()) {
@@ -654,6 +760,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val authorization = DesfireFactoryResetAuthorization.confirm(preflight, preflight.confirmationPhrase)
         val result = factoryResetUseCase.execute(NativeDesfireCardBackend(tag.id), authorization, currentKey)
 
+        if (result.verifiedSuccess) playSuccessSound() else playFailureSound()
+
         runOnUiThread {
             actionsFragment.updateUseCaseSummary()
             actionsFragment.updateStatus(
@@ -666,6 +774,58 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 cardLabel = "DESFire Factory Reset",
                 timestamp = System.currentTimeMillis(),
                 factoryResetResult = result
+            )
+            resultsFragment.addScanResult(item)
+            binding.bottomNav.selectedItemId = R.id.nav_results
+        }
+    }
+
+    private fun runRestoreTransportConfig(tag: Tag, uidText: String) {
+        runOnUiThread { actionsFragment.updateStatus("Restoring PICC transport config... keep card in field.") }
+
+        val currentKey = piccMasterKey
+        if (currentKey == null) {
+            runOnUiThread { actionsFragment.updateStatus("Restore Transport Config: PICC master key not configured. Set it in Settings.") }
+            playFailureSound()
+            return
+        }
+
+        val backend = NativeDesfireCardBackend(tag.id)
+        val connectResult = backend.connect()
+        if (!connectResult.isSuccess) {
+            backend.disconnect()
+            runOnUiThread { actionsFragment.updateStatus("Restore Transport Config: could not connect to card.") }
+            playFailureSound()
+            return
+        }
+
+        val authResult = backend.execute(DesfireAuthenticate(appId = 0, key = currentKey))
+        if (!authResult.isSuccess) {
+            backend.disconnect()
+            runOnUiThread { actionsFragment.updateStatus("Restore Transport Config: authentication failed. Check PICC master key.") }
+            playFailureSound()
+            return
+        }
+
+        val transportKey = DesfireFactoryDefaults.piccMasterKey()
+        val changeResult = backend.execute(DesfireChangePiccMasterKey(currentKey, transportKey))
+        transportKey.clear()
+        backend.disconnect()
+
+        val success = changeResult.isSuccess
+        val resultText = if (success) "PICC master key changed to DES factory default (32× 0x00)."
+                         else "Restore Transport Config: key change command rejected."
+
+        if (success) playSuccessSound() else playFailureSound()
+
+        runOnUiThread {
+            actionsFragment.updateUseCaseSummary()
+            actionsFragment.updateStatus(if (success) "Restore Transport Config complete." else resultText)
+            val item = ScanHistoryItem(
+                uid = uidText,
+                cardLabel = "DESFire Transport Config Restored",
+                timestamp = System.currentTimeMillis(),
+                savedCardText = resultText
             )
             resultsFragment.addScanResult(item)
             binding.bottomNav.selectedItemId = R.id.nav_results
