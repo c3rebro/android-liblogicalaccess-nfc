@@ -13,9 +13,12 @@ import java.io.OutputStream
  */
 class DesfireQuickCheckPdfRenderer {
     fun write(document: DesfireQuickCheckReportDocument, output: OutputStream) {
+        writeLines(DesfireQuickCheckTextRenderer.lines(document), output)
+    }
+
+    fun writeLines(lines: List<String>, output: OutputStream) {
         val pdf = PdfDocument()
         try {
-            val lines = DesfireQuickCheckTextRenderer.lines(document)
             var pageNumber = 0
             var page: PdfDocument.Page? = null
             var y = 0f
@@ -53,6 +56,8 @@ class DesfireQuickCheckPdfRenderer {
                 val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     textSize = style.textSize
                     typeface = style.typeface
+                    if (rawLine in SECTION_HEADINGS) color = android.graphics.Color.rgb(17, 100, 160)
+                    if (rawLine == "Warnings") color = android.graphics.Color.rgb(176, 0, 32)
                 }
                 val availableWidth = PAGE_WIDTH - LEFT_MARGIN - RIGHT_MARGIN
                 val wrapped = wrap(rawLine, paint, availableWidth)
@@ -108,7 +113,7 @@ class DesfireQuickCheckPdfRenderer {
             typeface = Typeface.DEFAULT
         }
         page.canvas.drawText(
-            "DESFire Quick Check - page $pageNumber",
+            "RFIDGear scan report - page $pageNumber",
             LEFT_MARGIN,
             PAGE_HEIGHT - 18f,
             paint
@@ -132,7 +137,10 @@ class DesfireQuickCheckPdfRenderer {
         private const val BODY_LINE_HEIGHT = 14f
 
         private val SECTION_HEADINGS = setOf(
+            "DESFire Quick Check Report",
             "Card",
+            "Card results",
+            "Reader / environment",
             "Environment",
             "Warnings"
         )

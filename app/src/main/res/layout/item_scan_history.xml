@@ -84,6 +84,16 @@
                 android:typeface="monospace"
                 android:textSize="12sp" />
 
+            <LinearLayout android:id="@+id/environmentSection" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginTop="16dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="READER / ENVIRONMENT" android:textStyle="bold" android:textSize="14sp"
+                    android:textColor="@color/brand_blue_text" />
+                <TextView android:id="@+id/environmentDetails" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textSize="12sp" android:typeface="monospace"
+                    android:textIsSelectable="true" />
+            </LinearLayout>
+
             <Button
                 android:id="@+id/exportPdf"
                 android:layout_width="wrap_content"

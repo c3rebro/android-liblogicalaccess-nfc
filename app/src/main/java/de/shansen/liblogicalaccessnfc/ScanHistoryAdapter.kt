@@ -3,19 +3,24 @@ package de.shansen.liblogicalaccessnfc
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
+import android.graphics.Typeface
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import de.shansen.liblogicalaccessnfc.databinding.ItemScanHistoryBinding
-import de.shansen.rfidgearruntime.DesfireQuickCheckTextRenderer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class ScanHistoryAdapter(
     private val items: MutableList<ScanHistoryItem>,
-    private val onExportPdf: (ScanHistoryItem) -> Unit
+    private val onExportPdf: (ScanHistoryItem) -> Unit,
+    private val onChanged: () -> Unit
 ) : RecyclerView.Adapter<ScanHistoryAdapter.ViewHolder>() {
 
     inner class ViewHolder(val binding: ItemScanHistoryBinding) :
@@ -39,13 +44,33 @@ class ScanHistoryAdapter(
         b.body.visibility = if (item.isExpanded) View.VISIBLE else View.GONE
 
         if (item.isExpanded) {
-            b.details.text = buildDetailsText(item)
-            b.exportPdf.visibility = if (item.document != null) View.VISIBLE else View.GONE
+            val text = item.cardText()
+            val styled = SpannableString(text)
+            var offset = 0
+            text.lines().forEach { line ->
+                if (line == "Card" || line == "DESFire Quick Check Report" || line == "Warnings") {
+                    val end = offset + line.length
+                    styled.setSpan(StyleSpan(Typeface.BOLD), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    styled.setSpan(TypefaceSpan("sans-serif"), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    styled.setSpan(AbsoluteSizeSpan(14, true), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    val color = if (line == "Warnings") com.google.android.material.color.MaterialColors.getColor(
+                        b.details, com.google.android.material.R.attr.colorError)
+                    else ContextCompat.getColor(b.root.context, R.color.brand_blue_text)
+                    styled.setSpan(ForegroundColorSpan(color), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                offset += line.length + 1
+            }
+            b.details.text = styled
+            b.environmentDetails.text = item.environmentText()
+            b.environmentSection.visibility = if (item.environmentText().isBlank()) View.GONE else View.VISIBLE
+            b.exportPdf.visibility = View.VISIBLE
         }
 
         b.header.setOnClickListener {
             item.isExpanded = !item.isExpanded
-            notifyItemChanged(holder.bindingAdapterPosition)
+            val index = holder.bindingAdapterPosition
+            if (index != RecyclerView.NO_POSITION) notifyItemChanged(index)
+            onChanged()
         }
 
         b.exportPdf.setOnClickListener {
@@ -55,43 +80,6 @@ class ScanHistoryAdapter(
 
     override fun getItemCount(): Int = items.size
 
-    fun prepend(item: ScanHistoryItem) {
-        items.add(0, item)
-        notifyItemInserted(0)
-    }
-
-    private fun buildDetailsText(item: ScanHistoryItem): String = when {
-        item.document != null -> buildString {
-            item.detectedPiccKeyLabel?.let {
-                appendLine("PICC master key: $it [auto-detected]")
-                appendLine()
-            }
-            append(DesfireQuickCheckTextRenderer.render(item.document))
-        }
-        item.formatResult != null -> buildString {
-            appendLine("Format result: ${item.formatResult.status.name}")
-            item.formatResult.message?.let { appendLine(it) }
-            if (item.formatResult.destructiveOperationInvoked) {
-                appendLine("FORMAT_PICC was invoked.")
-            }
-            item.formatResult.remainingApplicationIds?.let { aids ->
-                if (aids.isEmpty()) appendLine("Application directory: empty (verified).")
-                else appendLine("Remaining AIDs: ${aids.map { "0x%06X".format(it) }}")
-            }
-        }.trimEnd()
-        item.factoryResetResult != null -> buildString {
-            appendLine("Factory Reset result: ${item.factoryResetResult.status.name}")
-            item.factoryResetResult.message?.let { appendLine(it) }
-            appendLine("FORMAT_PICC invoked: ${item.factoryResetResult.formatOperationInvoked}")
-            appendLine("Key reset invoked: ${item.factoryResetResult.keyResetOperationInvoked}")
-            item.factoryResetResult.remainingApplicationIds?.let { aids ->
-                if (aids.isEmpty()) appendLine("Application directory: empty (verified).")
-                else appendLine("Remaining AIDs: ${aids.map { "0x%06X".format(it) }}")
-            }
-        }.trimEnd()
-        else -> "No details available."
-    }
-
     private fun formatTime(timestamp: Long): String =
-        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
 }

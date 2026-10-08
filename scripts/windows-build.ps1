@@ -536,16 +536,13 @@ tools.cmake.cmaketoolchain:extra_variables={"BUILD_TESTING": "OFF"}
     # We detect staleness by checking whether the deployed liblogicalaccess.so has PT_LOAD
     # segments aligned to 16 KB (0x4000).  If not, we clear all packages so they are
     # relinked from source with the updated profile sharedlinkflags.
-    $deployCheck = Join-Path $tools 'conan-deploy\android-arm64'
     $jniRoot = Join-Path $tools 'jniLibs\arm64-v8a'
     $llaDeployed = Join-Path $jniRoot 'liblogicalaccess.so'
 
     $needsRebuild = $false
-    $boostDeploySoFiles = @(Get-ChildItem $deployCheck -Recurse -Filter 'libboost_system.so' `
-        -ErrorAction SilentlyContinue)
-    if ($boostDeploySoFiles.Count -eq 0) {
-        $needsRebuild = $true
-    } elseif (Test-Path $llaDeployed) {
+    # A fresh clone has no staged libraries, but valid Conan packages may already
+    # exist. Let --build=missing reuse those rather than deleting the cache.
+    if (Test-Path $llaDeployed) {
         # Check PT_LOAD alignment; 16 KB-aligned binaries show 0x4000 in readelf -Wl output.
         $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
         if ($wsl) {
@@ -678,7 +675,7 @@ function Wait-ForDevice([string]$Adb, [int]$Seconds) {
 
 function Install-AndLaunch([string]$Adb, [string]$Apk, [string]$Serial) {
     Step 'Installing debug APK'
-    & $Adb -s $Serial install -r $Apk
+    & $Adb -s $Serial install --no-streaming -r $Apk
     if ($LASTEXITCODE -ne 0) { Fail 'ADB install failed.' }
     if ($SkipLaunch) { return }
 
@@ -687,9 +684,9 @@ function Install-AndLaunch([string]$Adb, [string]$Apk, [string]$Serial) {
     & $Adb -s $Serial shell am start -W -n "$AppId/$Activity"
     if ($LASTEXITCODE -ne 0) { Fail 'ADB launch failed.' }
     Start-Sleep -Seconds 1
-    $pid = (& $Adb -s $Serial shell pidof $AppId).Trim()
-    if (-not $pid) { Fail 'App was installed but is not running after launch.' }
-    Write-Host "`nSUCCESS — app is running on $Serial (PID $pid)." -ForegroundColor Green
+    $appProcessId = (& $Adb -s $Serial shell pidof $AppId).Trim()
+    if (-not $appProcessId) { Fail 'App was installed but is not running after launch.' }
+    Write-Host "`nSUCCESS — app is running on $Serial (PID $appProcessId)." -ForegroundColor Green
     Write-Host 'Present a DESFire card to run the read-only Quick Check.' -ForegroundColor Green
 }
 
@@ -820,6 +817,12 @@ try {
     # default ~/.conan2 path each entry is ~80 chars, which blows the limit.
     # C:\c2 keeps each entry short enough to fit within the limit.
     $env:CONAN_HOME = 'C:\c2'
+
+    # JVM local sockets can fail in redirected Windows TEMP directories.
+    # Keep the override scoped to this build and its child processes.
+    $javaSocketTemp = Join-Path $env:CONAN_HOME 'java-temp'
+    New-Item -ItemType Directory -Force $javaSocketTemp | Out-Null
+    $env:JAVA_TOOL_OPTIONS = "$env:JAVA_TOOL_OPTIONS -Djdk.net.unixdomain.tmpdir=$javaSocketTemp".Trim()
 
     $conan  = Ensure-Conan $python
     $gradle = Ensure-Gradle

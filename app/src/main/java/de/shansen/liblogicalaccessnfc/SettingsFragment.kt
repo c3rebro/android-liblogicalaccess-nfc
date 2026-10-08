@@ -99,7 +99,12 @@ class SettingsFragment : Fragment() {
                 }
 
                 result.onSuccess { key ->
-                    main.setPiccKey(label, key)
+                    val saved = runCatching { main.setPiccKey(label, key, dialogBinding.savePermanently.isChecked) }
+                    if (saved.isFailure) {
+                        key.clear()
+                        dialogBinding.keyHex.error = "Unable to save securely. Try a session key instead."
+                        return@onSuccess
+                    }
                     updateKeySummaries()
                     dialog.dismiss()
                 }.onFailure { error ->

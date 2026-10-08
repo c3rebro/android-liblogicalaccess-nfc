@@ -14,9 +14,9 @@
             android:layout_height="wrap_content"
             android:text="APPLICATION KEYS"
             android:textStyle="bold"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:letterSpacing="0.1"
-            android:textColor="?attr/colorPrimary"
+            android:textColor="@color/brand_blue_text"
             android:layout_marginBottom="8dp" />
 
         <Button
@@ -27,10 +27,12 @@
 
         <Button
             android:id="@+id/clearQuickCheckKeys"
+            android:backgroundTint="?attr/colorError"
+            android:textColor="?attr/colorOnError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Clear all session keys" />
+            android:text="Clear application keys (including saved)" />
 
         <TextView
             android:id="@+id/quickCheckKeySummary"
@@ -54,9 +56,9 @@
             android:layout_height="wrap_content"
             android:text="PICC MASTER KEY"
             android:textStyle="bold"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:letterSpacing="0.1"
-            android:textColor="?attr/colorPrimary"
+            android:textColor="@color/brand_blue_text"
             android:layout_marginBottom="4dp" />
 
         <TextView
@@ -74,6 +76,8 @@
 
         <Button
             android:id="@+id/clearPiccKey"
+            android:backgroundTint="?attr/colorError"
+            android:textColor="?attr/colorOnError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -101,9 +105,9 @@
             android:layout_height="wrap_content"
             android:text="INFO"
             android:textStyle="bold"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:letterSpacing="0.1"
-            android:textColor="?attr/colorPrimary"
+            android:textColor="@color/brand_blue_text"
             android:layout_marginBottom="8dp" />
 
         <TextView

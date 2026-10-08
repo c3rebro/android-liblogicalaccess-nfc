@@ -30,9 +30,11 @@ It must never contain DESFire key bytes. JVM tests verify that raw key material 
 
 ## PDF export
 
-The Android app keeps the latest secret-free report document after a Quick Check. `Export last Quick Check as PDF` uses Android's `CreateDocument("application/pdf")` contract so the user chooses the destination.
+The Android app stores secret-free scan snapshots in an atomic private history file. History survives orientation changes, menu changes and restarts. Each scan offers PDF export; the Results toolbar can export all scans together or clear history after confirmation. PDF exports use Android's `CreateDocument("application/pdf")` contract so the user chooses the destination. Card results and reader/environment details have separate sections. A newly added scan expands and collapses earlier scans.
 
 `DesfireQuickCheckPdfRenderer` uses the platform `android.graphics.pdf.PdfDocument` API. No third-party PDF dependency is required. The renderer supports page wrapping/pagination and page footers.
+
+The PICC master-key probe follows the application-directory line in both new and persisted reports. The report title and Card heading use the same blue header style as Reader / Environment; warning headings remain red. This formatting is applied at presentation time without requiring a card rescan.
 
 The PDF is a presentation of an already completed Quick Check; generating or saving the PDF never accesses the card.
 

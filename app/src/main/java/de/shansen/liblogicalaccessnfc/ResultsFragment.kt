@@ -13,7 +13,8 @@ class ResultsFragment : Fragment() {
     private var _binding: FragmentResultsBinding? = null
     private val binding get() = _binding!!
 
-    private val scanHistory = mutableListOf<ScanHistoryItem>()
+    private var scanHistory = mutableListOf<ScanHistoryItem>()
+    private lateinit var store: ScanHistoryStore
     private lateinit var adapter: ScanHistoryAdapter
 
     override fun onCreateView(
@@ -29,8 +30,20 @@ class ResultsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         val main = requireActivity() as MainActivity
-        adapter = ScanHistoryAdapter(scanHistory) { item ->
-            item.document?.let { main.exportQuickCheckPdf(it) }
+        store = ScanHistoryStore(requireContext())
+        runCatching { store.load() }.onSuccess { scanHistory = it }.onFailure {
+            android.widget.Toast.makeText(requireContext(), "Scan history could not be read.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        adapter = ScanHistoryAdapter(scanHistory, { main.exportScanPdf(it) }, { persistHistory() })
+        binding.exportAllScans.setOnClickListener { main.exportAllScansPdf(scanHistory.toList()) }
+        binding.clearHistory.setOnClickListener {
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Clear scan history?")
+                .setMessage("All stored scan results will be deleted. Saved keys are kept.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    scanHistory.clear(); persistHistory(); adapter.notifyDataSetChanged(); updateEmptyState()
+                }.show()
         }
         binding.scanHistoryList.layoutManager = LinearLayoutManager(requireContext())
         binding.scanHistoryList.adapter = adapter
@@ -44,14 +57,25 @@ class ResultsFragment : Fragment() {
     }
 
     fun addScanResult(item: ScanHistoryItem) {
+        scanHistory.forEach { it.isExpanded = false }
+        item.isExpanded = true
         scanHistory.add(0, item)
-        adapter.notifyItemInserted(0)
+        persistHistory()
+        adapter.notifyDataSetChanged()
         binding.scanHistoryList.scrollToPosition(0)
         updateEmptyState()
     }
 
+    private fun persistHistory() {
+        runCatching { store.save(scanHistory) }.onFailure {
+            android.widget.Toast.makeText(requireContext(), "History could not be saved. Check device storage.", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun updateEmptyState() {
         val b = _binding ?: return
+        b.exportAllScans.isEnabled = scanHistory.isNotEmpty()
+        b.clearHistory.isEnabled = scanHistory.isNotEmpty()
         b.emptyHint.visibility = if (scanHistory.isEmpty()) View.VISIBLE else View.GONE
     }
 }
