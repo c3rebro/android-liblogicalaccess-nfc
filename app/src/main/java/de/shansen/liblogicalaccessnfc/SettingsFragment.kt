@@ -45,7 +45,11 @@ class SettingsFragment : Fragment() {
             main.clearPiccKey()
             updateKeySummaries()
         }
-        binding.versionInfo.text = "Native bridge: ${NativeBridge.version()}"
+        binding.versionInfo.text = buildString {
+            appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Commit: ${BuildConfig.GIT_COMMIT}")
+            append("Native bridge: ${NativeBridge.version()}")
+        }
 
         updateKeySummaries()
     }

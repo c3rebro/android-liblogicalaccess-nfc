@@ -5,6 +5,13 @@ plugins {
 
 val llaConanDir = rootProject.file(".tools/conan/android-arm64").invariantSeparatorsPath
 
+val gitCommit: String = runCatching {
+    Runtime.getRuntime()
+        .exec(arrayOf("git", "rev-parse", "--short", "HEAD"))
+        .inputStream.bufferedReader().readText().trim()
+        .ifBlank { "unknown" }
+}.getOrDefault("unknown")
+
 android {
     namespace = "de.shansen.liblogicalaccessnfc"
     compileSdk = 35
@@ -16,6 +23,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
 
         externalNativeBuild {
             cmake {
@@ -56,6 +64,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
