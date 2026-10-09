@@ -347,7 +347,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         armState = ArmState.Armed
         nfcAdapter?.enableReaderMode(
             this, this,
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
             Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) }
         )
         AppLogger.log("ARM", "Armed; action=${activeScanUseCase.name} runMode=${runMode.name}")
@@ -374,7 +375,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 armState = ArmState.Armed
                 nfcAdapter?.enableReaderMode(
                     this, this,
-                    NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                    NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+                        NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
                     Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) }
                 )
             }
