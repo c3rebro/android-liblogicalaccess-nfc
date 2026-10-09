@@ -1,10 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Brand blue – primary -->
     <color name="ic_launcher_background">#1B8ADB</color>
     <color name="brand_blue">#1B8ADB</color>
     <color name="brand_blue_dark">#1164A0</color>
     <color name="brand_blue_text">#1164A0</color>
-    <color name="brand_blue_on_primary">#071B2A</color>
+    <color name="brand_blue_on_primary">#FFFFFF</color>
+    <!-- M3 container tokens for primary -->
+    <color name="brand_blue_container">#D0E4FF</color>
+    <color name="brand_blue_on_container">#001D35</color>
+    <!-- M3 secondary (muted blue-gray) -->
+    <color name="brand_blue_secondary">#516577</color>
+    <color name="brand_blue_secondary_container">#D4E8F7</color>
+
+    <!-- Brand amber – retained for the autorun banner -->
     <color name="brand_amber">#F57C00</color>
     <color name="brand_amber_on">#FFFFFF</color>
+
+    <!-- Semantic: warning (maps to brand_amber in light) -->
+    <color name="color_warning">#F57C00</color>
+    <color name="color_on_warning">#FFFFFF</color>
+    <color name="color_warning_container">#FFE0B2</color>
+    <color name="color_on_warning_container">#4A1900</color>
+
+    <!-- Semantic: success -->
+    <color name="color_success">#1A6E37</color>
+    <color name="color_on_success">#FFFFFF</color>
+    <color name="color_success_container">#B7FFCF</color>
+    <color name="color_on_success_container">#002110</color>
+
+    <!-- Semantic: partial result (orange-brown) -->
+    <color name="color_partial">#895200</color>
+    <color name="color_on_partial">#FFFFFF</color>
+    <color name="color_partial_container">#FFDDB8</color>
+    <color name="color_on_partial_container">#2C1600</color>
+
+    <!-- Section label (alias to brand_blue_text in each mode) -->
+    <color name="color_section_label">@color/brand_blue_text</color>
 </resources>

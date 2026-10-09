@@ -5,46 +5,78 @@
     android:orientation="vertical"
     android:padding="20dp">
 
-    <EditText
-        android:id="@+id/aid"
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/til_aid"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Application ID (decimal or 0x...)"
-        android:inputType="text" />
+        android:hint="@string/hint_aid">
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/aid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
 
-    <EditText
-        android:id="@+id/label"
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/til_label"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="Key label"
-        android:inputType="text" />
+        android:layout_marginTop="@dimen/spacing_s"
+        android:hint="@string/hint_key_label">
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
 
-    <Spinner
-        android:id="@+id/keyType"
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/til_key_type"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp" />
+        android:layout_marginTop="@dimen/spacing_m"
+        android:hint="@string/hint_key_type">
+        <com.google.android.material.textfield.MaterialAutoCompleteTextView
+            android:id="@+id/keyType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
 
-    <EditText
-        android:id="@+id/keyNumber"
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/til_key_number"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="Key number (0-15)"
-        android:inputType="number"
-        android:text="0" />
+        android:layout_marginTop="@dimen/spacing_s"
+        android:hint="@string/hint_key_number">
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/keyNumber"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:text="0" />
+    </com.google.android.material.textfield.TextInputLayout>
 
-    <EditText
-        android:id="@+id/keyHex"
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/til_key_hex"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:fontFamily="monospace"
-        android:hint="Key in hexadecimal"
-        android:inputType="textVisiblePassword"
-        android:saveEnabled="false"
-        android:maxLines="2" />
+        android:layout_marginTop="@dimen/spacing_s"
+        android:hint="@string/hint_key_hex">
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/keyHex"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:inputType="textVisiblePassword"
+            android:saveEnabled="false"
+            android:maxLines="2" />
+    </com.google.android.material.textfield.TextInputLayout>
 
     <TextView
         android:id="@+id/hexCounter"
@@ -52,20 +84,29 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
         android:textAlignment="textEnd"
-        android:textSize="14sp"
+        android:textSize="@dimen/text_size_label"
         android:fontFamily="monospace"
         android:text="0 / 32 hex chars" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="The key is session-only by default and is not displayed again after entry."
-        android:textSize="15sp" />
-    <CheckBox android:id="@+id/savePermanently" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:text="Save key permanently on this device"
+        android:layout_marginTop="@dimen/spacing_m"
+        android:text="@string/key_session_only_note"
+        android:textSize="@dimen/text_size_body" />
+
+    <com.google.android.material.checkbox.MaterialCheckBox
+        android:id="@+id/savePermanently"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/save_key_permanently"
         android:checked="false" />
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Permanent key storage is not recommended. Saved keys are encrypted on this device, but keeping keys only for the session is safer."
-        android:textSize="15sp" android:textColor="?attr/colorError" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/key_permanent_warning"
+        android:textSize="@dimen/text_size_body"
+        android:textColor="?attr/colorError" />
+
 </LinearLayout>

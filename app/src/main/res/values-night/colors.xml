@@ -1,3 +1,33 @@
 <resources>
+    <!-- Brand blue – adaptive primary for dark surfaces -->
+    <color name="brand_blue">#9DCCFF</color>
+    <color name="brand_blue_dark">#004A7F</color>
     <color name="brand_blue_text">#70BFFF</color>
+    <color name="brand_blue_on_primary">#003258</color>
+    <color name="brand_blue_container">#004A7F</color>
+    <color name="brand_blue_on_container">#D0E4FF</color>
+    <color name="brand_blue_secondary">#B0C7D8</color>
+    <color name="brand_blue_secondary_container">#374653</color>
+
+    <!-- Brand amber – lighter for dark backgrounds -->
+    <color name="brand_amber">#FFB74D</color>
+    <color name="brand_amber_on">#472A00</color>
+
+    <!-- Semantic: warning -->
+    <color name="color_warning">#FFB74D</color>
+    <color name="color_on_warning">#472A00</color>
+    <color name="color_warning_container">#653E00</color>
+    <color name="color_on_warning_container">#FFB863</color>
+
+    <!-- Semantic: success -->
+    <color name="color_success">#83DC9A</color>
+    <color name="color_on_success">#00391C</color>
+    <color name="color_success_container">#00522A</color>
+    <color name="color_on_success_container">#B7FFCF</color>
+
+    <!-- Semantic: partial -->
+    <color name="color_partial">#FFB870</color>
+    <color name="color_on_partial">#4A2700</color>
+    <color name="color_partial_container">#6A3C00</color>
+    <color name="color_on_partial_container">#FFDDB8</color>
 </resources>

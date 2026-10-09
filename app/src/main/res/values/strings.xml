@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RFIDGear</string>
+
+    <!-- Actions fragment -->
+    <string name="welcome_heading">Welcome to RFIDGear</string>
+    <string name="section_rfid_actions">RFID Actions</string>
+    <string name="action_quick_check">Quick Check (read only)</string>
+    <string name="action_restore_transport">Restore PICC transport config</string>
+    <string name="action_format">Format DESFire card (destructive)</string>
+    <string name="action_factory_reset">Factory Reset DESFire card (destructive)</string>
+    <string name="nfc_status_ready">Ready. Hold an NFC card near the phone.</string>
+    <string name="section_project">Project</string>
+    <string name="action_open_project">Open RFIDGear project</string>
+    <string name="project_none_loaded">No .rfPrj project loaded.</string>
+
+    <!-- Results fragment -->
+    <string name="section_scan_history">Scan History</string>
+    <string name="scan_history_empty">No scans yet</string>
+    <string name="action_export_all_scans">Export all scans</string>
+    <string name="action_clear_history">Clear history</string>
+
+    <!-- Settings fragment -->
+    <string name="section_application_keys">Application Keys</string>
+    <string name="action_add_app_key">Add application key</string>
+    <string name="action_clear_app_keys">Clear application keys (including saved)</string>
+    <string name="app_keys_none">No application-specific quick-check keys configured.</string>
+    <string name="section_picc_master_key">PICC Master Key</string>
+    <string name="picc_key_description">Required for Format and Factory Reset operations.</string>
+    <string name="action_set_picc_key">Set PICC master key</string>
+    <string name="action_clear_picc_key">Clear PICC master key</string>
+    <string name="picc_key_none">No PICC master key configured.</string>
+    <string name="section_autorun">Autorun</string>
+    <string name="autorun_label">Auto-repeat mode: scan every card automatically (no button press needed)</string>
+    <string name="autorun_safety_warning">⚠  In auto-repeat mode, each card contact immediately runs the selected action. Tap "Start auto mode" on the Actions screen. Destructive actions require confirmation each time you arm.</string>
+    <string name="section_sound">Sound</string>
+    <string name="sound_label">Play sound on action success / failure</string>
+    <string name="section_info">Info</string>
+    <string name="section_debug">Debug</string>
+    <string name="action_export_log">Export log (zip)</string>
+
+    <!-- Key dialogs -->
+    <string name="dialog_title_app_key">DESFire application key</string>
+    <string name="dialog_title_picc_key">PICC master key</string>
+    <string name="hint_aid">Application ID (decimal or 0x…)</string>
+    <string name="hint_key_label">Key label</string>
+    <string name="hint_key_number">Key number (0–15)</string>
+    <string name="hint_key_hex">Key in hexadecimal</string>
+    <string name="hint_picc_key_hex">Key in hexadecimal (key #0, PICC level)</string>
+    <string name="hint_key_type">Key type</string>
+    <string name="key_session_only_note">The key is session-only by default and is not displayed again after entry.</string>
+    <string name="save_key_permanently">Save key permanently on this device</string>
+    <string name="key_permanent_warning">Permanent key storage is not recommended. Saved keys are encrypted on this device, but keeping keys only for the session is safer.</string>
+    <string name="picc_key_dialog_note">The PICC master key is key #0 at application ID 0x000000. Required for Format and Factory Reset. Session-only unless permanent saving is selected.</string>
+
+    <!-- Buttons -->
+    <string name="btn_add">Add</string>
+    <string name="btn_set">Set</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_clear">Clear</string>
+    <string name="btn_format">Format</string>
+    <string name="btn_reset">Reset</string>
+    <string name="btn_export_pdf">Export PDF</string>
+    <string name="btn_wait_for_card">Wait for next card</string>
+    <string name="btn_add_key">Add key</string>
+    <string name="btn_rescan_once">Rescan once</string>
+    <string name="btn_dismiss">Dismiss</string>
+
+    <!-- Confirmations -->
+    <string name="confirm_clear_history_title">Clear scan history?</string>
+    <string name="confirm_clear_history_message">All stored scan results will be deleted. Saved keys are kept.</string>
+
+    <!-- Destructive autorun -->
+    <string name="dialog_title_destructive_autorun">Enable autorun for destructive action?</string>
+    <string name="msg_destructive_autorun_confirm">Autorun will be set to: %1$s\n\nEvery card contact will immediately show a confirmation prompt to permanently delete all card data.\n\nYou will be asked to re-confirm each time you return to the app or the screen turns on.</string>
+    <string name="msg_destructive_autorun_reconfirm">Autorun is active for: %1$s\n\nEvery card tap will prompt for a destructive operation. Confirm to continue, or cancel to disable autorun.</string>
+    <string name="btn_enable">Enable</string>
+    <string name="btn_continue">Continue</string>
+</resources>

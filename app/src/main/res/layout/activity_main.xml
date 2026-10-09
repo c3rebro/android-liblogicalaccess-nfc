@@ -17,12 +17,18 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:visibility="gone"
-        android:background="@color/brand_amber"
-        android:textColor="@color/brand_amber_on"
-        android:padding="10dp"
+        android:background="@color/color_warning"
+        android:textColor="@color/color_on_warning"
+        android:paddingVertical="6dp"
+        android:paddingHorizontal="@dimen/content_margin_horizontal"
         android:gravity="center"
-        android:textSize="15sp"
+        android:textSize="@dimen/text_size_body"
         android:textStyle="bold"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground"
         android:text="⚠  AUTORUN ACTIVE" />
 
     <com.google.android.material.bottomnavigation.BottomNavigationView

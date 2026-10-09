@@ -7,134 +7,253 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingHorizontal="@dimen/content_margin_horizontal"
+        android:paddingTop="@dimen/content_margin_vertical"
+        android:paddingBottom="@dimen/spacing_xl">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Welcome to RFIDGear"
-            android:textStyle="bold"
-            android:textSize="22sp"
-            android:textColor="@color/brand_blue"
-            android:layout_marginBottom="12dp" />
-
-        <!-- Selected action indicator: left accent bar + label -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="12dp">
-
-            <View
-                android:id="@+id/activeUseCaseAccent"
-                android:layout_width="4dp"
-                android:layout_height="match_parent"
-                android:background="?attr/colorPrimary" />
-
-            <TextView
-                android:id="@+id/activeUseCaseSummary"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:textSize="15sp"
-                android:typeface="monospace" />
-
-        </LinearLayout>
+            android:text="@string/welcome_heading"
+            android:textAppearance="?attr/textAppearanceHeadlineSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="@dimen/spacing_m" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="RFID ACTIONS"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="8dp" />
+            android:text="@string/section_rfid_actions"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/section_margin_bottom" />
 
-        <Button
-            android:id="@+id/selectQuickCheckUseCase"
+        <!-- Action row: Quick Check -->
+        <LinearLayout
+            android:id="@+id/rowQuickCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Quick Check (read only)" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="@dimen/spacing_s"
+            android:paddingHorizontal="@dimen/spacing_xs"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true">
 
-        <Button
-            android:id="@+id/selectRestoreTransportUseCase"
-            android:backgroundTint="@color/brand_amber"
-            android:textColor="@color/brand_amber_on"
+            <RadioButton
+                android:id="@+id/radioQuickCheck"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clickable="false"
+                android:focusable="false"
+                android:layout_marginEnd="@dimen/spacing_s" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Quick Check"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Read-only card identification"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:alpha="0.7" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Action row: Restore Transport Config -->
+        <LinearLayout
+            android:id="@+id/rowRestoreTransport"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Restore PICC transport config" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="@dimen/spacing_s"
+            android:paddingHorizontal="@dimen/spacing_xs"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true">
 
-        <Button
-            android:id="@+id/selectFormatUseCase"
-            android:backgroundTint="?attr/colorError"
-            android:textColor="?attr/colorOnError"
+            <RadioButton
+                android:id="@+id/radioRestoreTransport"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clickable="false"
+                android:focusable="false"
+                android:layout_marginEnd="@dimen/spacing_s" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Restore Transport Config"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Reset PICC key to factory default (write)"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:alpha="0.7" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Action row: Format -->
+        <LinearLayout
+            android:id="@+id/rowFormat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Format DESFire card (destructive)" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="@dimen/spacing_s"
+            android:paddingHorizontal="@dimen/spacing_xs"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true">
 
-        <Button
-            android:id="@+id/selectFactoryResetUseCase"
-            android:backgroundTint="?attr/colorError"
-            android:textColor="?attr/colorOnError"
+            <RadioButton
+                android:id="@+id/radioFormat"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clickable="false"
+                android:focusable="false"
+                android:layout_marginEnd="@dimen/spacing_s" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Format DESFire card"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <TextView
+                    android:id="@+id/subtitleFormat"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Deletes all applications and files — DESTRUCTIVE"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorError" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Action row: Factory Reset -->
+        <LinearLayout
+            android:id="@+id/rowFactoryReset"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Factory Reset DESFire card (destructive)" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="@dimen/spacing_s"
+            android:paddingHorizontal="@dimen/spacing_xs"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true">
+
+            <RadioButton
+                android:id="@+id/radioFactoryReset"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clickable="false"
+                android:focusable="false"
+                android:layout_marginEnd="@dimen/spacing_s" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Factory Reset"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <TextView
+                    android:id="@+id/subtitleFactoryReset"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Deletes all data and resets PICC key — DESTRUCTIVE"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorError" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Arm / state button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/armButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_l"
+            android:text="@string/btn_wait_for_card" />
 
         <TextView
             android:id="@+id/nfcStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textSize="16sp"
-            android:text="Ready. Hold a DESFire card near the phone." />
+            android:layout_marginTop="@dimen/spacing_m"
+            android:textSize="@dimen/text_size_body"
+            android:text="@string/nfc_status_ready" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:layout_marginTop="@dimen/section_margin_top"
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="PROJECT"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="8dp" />
+            android:text="@string/section_project"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/section_margin_bottom" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/openProject"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Open RFIDGear project" />
+            android:text="@string/action_open_project" />
 
         <TextView
             android:id="@+id/projectSummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="No .rfPrj project loaded."
+            android:layout_marginTop="@dimen/spacing_m"
+            android:text="@string/project_none_loaded"
             android:textIsSelectable="true"
-            android:textSize="15sp"
+            android:textSize="@dimen/text_size_body"
             android:typeface="monospace" />
 
     </LinearLayout>

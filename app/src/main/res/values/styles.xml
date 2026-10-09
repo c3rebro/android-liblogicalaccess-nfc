@@ -1,12 +1,41 @@
 <resources>
-    <style name="Theme.App" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.App" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowActionModeOverlay">true</item>
         <item name="colorPrimary">@color/brand_blue</item>
-        <item name="colorPrimaryVariant">@color/brand_blue_dark</item>
-        <item name="colorPrimaryDark">@color/brand_blue_dark</item>
-        <item name="colorSecondary">@color/brand_blue_text</item>
-        <item name="colorSecondaryVariant">@color/brand_blue_dark</item>
         <item name="colorOnPrimary">@color/brand_blue_on_primary</item>
+        <item name="colorPrimaryContainer">@color/brand_blue_container</item>
+        <item name="colorOnPrimaryContainer">@color/brand_blue_on_container</item>
+        <item name="colorSecondary">@color/brand_blue_secondary</item>
         <item name="colorOnSecondary">@android:color/white</item>
+        <item name="colorSecondaryContainer">@color/brand_blue_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/brand_blue_on_container</item>
+    </style>
+
+    <!-- Danger button: error color fill -->
+    <style name="Widget.App.Button.Danger" parent="Widget.Material3.Button">
+        <item name="backgroundTint">?attr/colorError</item>
+        <item name="android:textColor">?attr/colorOnError</item>
+        <item name="iconTint">?attr/colorOnError</item>
+    </style>
+
+    <!-- Warning button: amber fill -->
+    <style name="Widget.App.Button.Warning" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/color_warning</item>
+        <item name="android:textColor">@color/color_on_warning</item>
+        <item name="iconTint">@color/color_on_warning</item>
+    </style>
+
+    <!-- Section label: uppercase label over a content block -->
+    <style name="TextAppearance.App.SectionLabel" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textSize">@dimen/text_size_section</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.08</item>
+        <item name="android:textColor">@color/color_section_label</item>
+    </style>
+
+    <!-- Card: outlined M3 style -->
+    <style name="Widget.App.Card" parent="Widget.Material3.CardView.Outlined">
+        <item name="cardCornerRadius">@dimen/card_corner_radius</item>
+        <item name="cardElevation">0dp</item>
     </style>
 </resources>

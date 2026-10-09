@@ -1,17 +1,19 @@
 package de.shansen.liblogicalaccessnfc
 
-import android.graphics.Canvas
-import android.graphics.Paint
+import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.text.SpannableStringBuilder
-import android.text.style.ReplacementSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.color.MaterialColors
 import de.shansen.liblogicalaccessnfc.databinding.FragmentActionsBinding
 import de.shansen.rfidgearruntime.RfidGearAction
 import de.shansen.rfidgearruntime.RfidGearActionSafetyPolicy
@@ -20,13 +22,14 @@ import de.shansen.rfproject.RfExecutionPlanCompiler
 import de.shansen.rfproject.RfProjectReader
 import de.shansen.rfproject.RfProjectValidator
 import de.shansen.rfproject.RfValidationSeverity
-import de.shansen.rfusecase.BuiltInUseCaseCatalog
+import kotlinx.coroutines.launch
 
 class ActionsFragment : Fragment() {
 
     private var _binding: FragmentActionsBinding? = null
     private val binding get() = _binding!!
 
+    private val sessionState by lazy { ViewModelProvider(requireActivity())[AppSessionState::class.java] }
     private val projectReader = RfProjectReader()
 
     override fun onCreateView(
@@ -43,23 +46,30 @@ class ActionsFragment : Fragment() {
 
         val main = requireActivity() as MainActivity
 
-        binding.selectQuickCheckUseCase.setOnClickListener {
-            main.selectQuickCheckUseCase()
-        }
-        binding.selectRestoreTransportUseCase.setOnClickListener {
-            main.selectRestoreTransportUseCase()
-        }
-        binding.selectFormatUseCase.setOnClickListener {
-            main.selectFormatUseCase()
-        }
-        binding.selectFactoryResetUseCase.setOnClickListener {
-            main.selectFactoryResetUseCase()
-        }
-        binding.openProject.setOnClickListener {
-            main.launchOpenProject()
+        binding.rowQuickCheck.setOnClickListener { main.selectQuickCheckUseCase() }
+        binding.rowRestoreTransport.setOnClickListener { main.selectRestoreTransportUseCase() }
+        binding.rowFormat.setOnClickListener { main.selectFormatUseCase() }
+        binding.rowFactoryReset.setOnClickListener { main.selectFactoryResetUseCase() }
+        binding.openProject.setOnClickListener { main.launchOpenProject() }
+
+        binding.armButton.setOnClickListener {
+            val state = sessionState.uiState.value
+            when (state.armState) {
+                is ArmState.Armed -> main.disarm()
+                is ArmState.Disarmed, is ArmState.PausedAfterBackground -> main.arm()
+                else -> {} // Running / WaitingForRemoval: button disabled
+            }
         }
 
-        updateUseCaseSummary()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                sessionState.uiState.collect { state ->
+                    binding.nfcStatus.text = state.nfcStatus
+                    updateActionRows(state)
+                    updateArmButton(state)
+                }
+            }
+        }
     }
 
     override fun onDestroyView() {
@@ -67,50 +77,61 @@ class ActionsFragment : Fragment() {
         _binding = null
     }
 
-    fun updateStatus(message: String) {
-        _binding?.nfcStatus?.text = message
+    private fun updateActionRows(state: MainUiState) {
+        val b = _binding ?: return
+        b.radioQuickCheck.isChecked = state.selectedAction == ActiveScanUseCase.QUICK_CHECK
+        b.radioRestoreTransport.isChecked = state.selectedAction == ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG
+        b.radioFormat.isChecked = state.selectedAction == ActiveScanUseCase.FORMAT
+        b.radioFactoryReset.isChecked = state.selectedAction == ActiveScanUseCase.FACTORY_RESET
     }
 
-    fun updateUseCaseSummary() {
-        val main = activity as? MainActivity ?: return
+    private fun updateArmButton(state: MainUiState) {
         val b = _binding ?: return
         val ctx = context ?: return
+        val main = activity as? MainActivity ?: return
 
-        val errorColor = com.google.android.material.color.MaterialColors.getColor(
-            b.activeUseCaseAccent, com.google.android.material.R.attr.colorError)
-        val (accentColor, summaryText) = when (main.activeScanUseCase) {
-            MainActivity.ActiveScanUseCase.QUICK_CHECK ->
-                ContextCompat.getColor(ctx, R.color.brand_blue) to
-                    "Quick Check  —  read-only"
-            MainActivity.ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG ->
-                ContextCompat.getColor(ctx, R.color.brand_amber) to
-                    "Restore Transport Config  —  write (non-destructive)"
-            MainActivity.ActiveScanUseCase.FORMAT ->
-                errorColor to "Format DESFire card  —  DESTRUCTIVE"
-            MainActivity.ActiveScanUseCase.FACTORY_RESET ->
-                errorColor to "Factory Reset DESFire card  —  DESTRUCTIVE"
-        }
-        b.activeUseCaseAccent.setBackgroundColor(accentColor)
-        b.activeUseCaseSummary.text = summaryText
+        val runMode = if (state.autorunEnabled) RunMode.AUTO_REPEAT else RunMode.MANUAL_ONE_SHOT
+        val isDestructive = main.isDestructiveAction(state.selectedAction)
 
-        val buttonDefs = listOf(
-            MainActivity.ActiveScanUseCase.QUICK_CHECK to
-                (b.selectQuickCheckUseCase to "Quick Check (read only)"),
-            MainActivity.ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG to
-                (b.selectRestoreTransportUseCase to "Restore PICC transport config"),
-            MainActivity.ActiveScanUseCase.FORMAT to
-                (b.selectFormatUseCase to "Format DESFire card (destructive)"),
-            MainActivity.ActiveScanUseCase.FACTORY_RESET to
-                (b.selectFactoryResetUseCase to "Factory Reset DESFire card (destructive)")
-        )
-        buttonDefs.forEach { (useCase, pair) ->
-            val (button, label) = pair
-            if (useCase == main.activeScanUseCase) {
-                val span = SpannableStringBuilder("▶  $label")
-                span.setSpan(ScaledCharSpan(1.6f), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                button.text = span
-            } else {
-                button.text = label
+        val primaryColor = MaterialColors.getColor(b.armButton, com.google.android.material.R.attr.colorPrimary)
+        val errorColor = MaterialColors.getColor(b.armButton, com.google.android.material.R.attr.colorError)
+        val secondaryColor = MaterialColors.getColor(b.armButton, com.google.android.material.R.attr.colorSecondary)
+
+        when (val armState = state.armState) {
+            is ArmState.Running -> {
+                b.armButton.isEnabled = false
+                b.armButton.text = "Scanning…"
+                b.armButton.backgroundTintList = ColorStateList.valueOf(primaryColor)
+            }
+            is ArmState.WaitingForRemoval -> {
+                b.armButton.isEnabled = false
+                b.armButton.text = "Remove card from field…"
+                b.armButton.backgroundTintList = ColorStateList.valueOf(primaryColor)
+            }
+            is ArmState.Armed -> {
+                b.armButton.isEnabled = true
+                if (runMode == RunMode.AUTO_REPEAT) {
+                    b.armButton.text = "Auto mode active · Stop"
+                    b.armButton.backgroundTintList = ColorStateList.valueOf(errorColor)
+                } else {
+                    b.armButton.text = "Waiting for card… Cancel"
+                    b.armButton.backgroundTintList = ColorStateList.valueOf(secondaryColor)
+                }
+            }
+            is ArmState.PausedAfterBackground -> {
+                b.armButton.isEnabled = true
+                b.armButton.text = if (runMode == RunMode.AUTO_REPEAT) "Resume auto mode" else "Wait for next card"
+                b.armButton.backgroundTintList = ColorStateList.valueOf(primaryColor)
+            }
+            is ArmState.Disarmed -> {
+                b.armButton.isEnabled = true
+                b.armButton.text = when {
+                    runMode == RunMode.AUTO_REPEAT && isDestructive -> "Start auto mode — confirms each scan"
+                    runMode == RunMode.AUTO_REPEAT -> "Start auto mode"
+                    isDestructive -> "Wait for card — will confirm"
+                    else -> "Wait for next card"
+                }
+                b.armButton.backgroundTintList = ColorStateList.valueOf(primaryColor)
             }
         }
     }
@@ -203,26 +224,5 @@ class ActionsFragment : Fragment() {
             if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
         }
         return uri.lastPathSegment
-    }
-
-    /** Draws a single character at [scale]× its normal size, centered in the line slot,
-     *  without modifying line metrics so the surrounding text baseline is unaffected. */
-    private class ScaledCharSpan(private val scale: Float) : ReplacementSpan() {
-        override fun getSize(paint: Paint, text: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
-            val orig = paint.textSize
-            paint.textSize = orig * scale
-            val w = paint.measureText(text, start, end).toInt()
-            paint.textSize = orig
-            return w
-        }
-        override fun draw(canvas: Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
-            val orig = paint.textSize
-            paint.textSize = orig * scale
-            val fm = paint.fontMetrics
-            val mid = (top + bottom) / 2f
-            val drawY = mid - (fm.ascent + fm.descent) / 2f
-            canvas.drawText(text ?: "", start, end, x, drawY, paint)
-            paint.textSize = orig
-        }
     }
 }

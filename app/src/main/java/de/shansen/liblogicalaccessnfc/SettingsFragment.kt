@@ -7,20 +7,26 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import de.shansen.liblogicalaccessnfc.databinding.DialogPiccMasterKeyBinding
 import de.shansen.liblogicalaccessnfc.databinding.FragmentSettingsBinding
 import de.shansen.rfcard.DesfireKey
 import de.shansen.rfcard.DesfireKeyType
 import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
+import kotlinx.coroutines.launch
 
 class SettingsFragment : Fragment() {
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
+    private val sessionState by lazy { ViewModelProvider(requireActivity())[AppSessionState::class.java] }
+    private var suppressSwitchListener = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -51,13 +57,29 @@ class SettingsFragment : Fragment() {
         }
         binding.autorunSwitch.isChecked = main.autorunEnabled
         binding.autorunSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (suppressSwitchListener) return@setOnCheckedChangeListener
             if (isChecked) {
                 val warning = main.checkAutorunReadiness()
                 if (warning != null) {
                     android.widget.Toast.makeText(requireContext(), warning, android.widget.Toast.LENGTH_LONG).show()
                 }
             }
-            main.applyAutorun(isChecked)
+            main.applyAutorun(isChecked, onDeclined = {
+                suppressSwitchListener = true
+                binding.autorunSwitch.isChecked = false
+                suppressSwitchListener = false
+            })
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                sessionState.uiState.collect { state ->
+                    suppressSwitchListener = true
+                    binding.autorunSwitch.isChecked = state.autorunEnabled
+                    suppressSwitchListener = false
+                    binding.autorunCurrentAction.text = "Current action: ${actionDisplayLabel(state.selectedAction)}"
+                }
+            }
         }
 
         binding.soundSwitch.isChecked = main.soundEnabled
@@ -92,19 +114,22 @@ class SettingsFragment : Fragment() {
         val main = requireActivity() as MainActivity
         val dialogBinding = DialogPiccMasterKeyBinding.inflate(layoutInflater)
         val keyTypes = listOf(DesfireKeyType.AES, DesfireKeyType.TDES_3K, DesfireKeyType.DES)
-        dialogBinding.keyType.adapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_dropdown_item,
-            keyTypes.map { keyTypeLabel(it) }
+        val keyTypeLabels = keyTypes.map { keyTypeLabel(it) }
+
+        dialogBinding.keyType.setAdapter(
+            ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, keyTypeLabels)
         )
+        dialogBinding.keyType.setText(keyTypeLabels[0], false)
+
+        fun selectedKeyType() = keyTypes[keyTypeLabels.indexOf(dialogBinding.keyType.text.toString()).coerceAtLeast(0)]
 
         val hexFilter = InputFilter { source, _, _, _, _, _ ->
             val filtered = source.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
             if (filtered.length == source.length) null else filtered.toString()
         }
         fun updateHexCounter() {
-            val max = if (keyTypes[dialogBinding.keyType.selectedItemPosition] == DesfireKeyType.TDES_3K) 48 else 32
-            val len = dialogBinding.keyHex.text.length
+            val max = if (selectedKeyType() == DesfireKeyType.TDES_3K) 48 else 32
+            val len = dialogBinding.keyHex.text?.length ?: 0
             dialogBinding.keyHex.filters = arrayOf(hexFilter, InputFilter.LengthFilter(max))
             dialogBinding.hexCounter.text = "$len / $max hex chars"
             dialogBinding.hexCounter.setTypeface(null,
@@ -116,26 +141,23 @@ class SettingsFragment : Fragment() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) { updateHexCounter() }
         })
-        dialogBinding.keyType.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) { updateHexCounter() }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        dialogBinding.keyType.setOnItemClickListener { _, _, _, _ -> updateHexCounter() }
 
-        val dialog = AlertDialog.Builder(requireContext())
-            .setTitle("PICC master key")
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.dialog_title_picc_key)
             .setView(dialogBinding.root)
-            .setPositiveButton("Set", null)
-            .setNegativeButton("Cancel", null)
+            .setPositiveButton(R.string.btn_set, null)
+            .setNegativeButton(R.string.btn_cancel, null)
             .create()
 
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                dialogBinding.label.error = null
-                dialogBinding.keyHex.error = null
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                dialogBinding.tilLabel.error = null
+                dialogBinding.tilKeyHex.error = null
 
                 val label = dialogBinding.label.text.toString()
                 val keyHex = dialogBinding.keyHex.text.toString().trim()
-                val type = keyTypes[dialogBinding.keyType.selectedItemPosition]
+                val type = selectedKeyType()
 
                 val result = runCatching {
                     require(label.isNotBlank()) { "Key label is required." }
@@ -147,7 +169,7 @@ class SettingsFragment : Fragment() {
                     val saved = runCatching { main.setPiccKey(label, key, dialogBinding.savePermanently.isChecked) }
                     if (saved.isFailure) {
                         key.clear()
-                        dialogBinding.keyHex.error = "Unable to save securely. Try a session key instead."
+                        dialogBinding.tilKeyHex.error = "Unable to save securely. Try a session key instead."
                         return@onSuccess
                     }
                     updateKeySummaries()
@@ -155,9 +177,9 @@ class SettingsFragment : Fragment() {
                 }.onFailure { error ->
                     val msg = error.message ?: "Invalid key."
                     if (msg.contains("label", ignoreCase = true)) {
-                        dialogBinding.label.error = msg
+                        dialogBinding.tilLabel.error = msg
                     } else {
-                        dialogBinding.keyHex.error = msg
+                        dialogBinding.tilKeyHex.error = msg
                     }
                 }
             }
@@ -186,5 +208,12 @@ class SettingsFragment : Fragment() {
         DesfireKeyType.AES -> "AES"
         DesfireKeyType.TDES_3K -> "3K3DES"
         DesfireKeyType.DES -> "DES / 2K3DES"
+    }
+
+    private fun actionDisplayLabel(action: ActiveScanUseCase): String = when (action) {
+        ActiveScanUseCase.QUICK_CHECK -> "Quick Check (read-only)"
+        ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG -> "Restore Transport Config"
+        ActiveScanUseCase.FORMAT -> "Format DESFire card (destructive)"
+        ActiveScanUseCase.FACTORY_RESET -> "Factory Reset (destructive)"
     }
 }

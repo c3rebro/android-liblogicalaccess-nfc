@@ -7,230 +7,216 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingHorizontal="@dimen/content_margin_horizontal"
+        android:paddingTop="@dimen/content_margin_vertical"
+        android:paddingBottom="@dimen/spacing_xl">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="APPLICATION KEYS"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="8dp" />
+            android:text="@string/section_application_keys"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/section_margin_bottom" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/addQuickCheckKey"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Add application key" />
+            android:text="@string/action_add_app_key" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/clearQuickCheckKeys"
-            android:backgroundTint="?attr/colorError"
-            android:textColor="?attr/colorOnError"
+            style="@style/Widget.App.Button.Danger"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Clear application keys (including saved)" />
+            android:layout_marginTop="@dimen/spacing_s"
+            android:text="@string/action_clear_app_keys" />
 
         <TextView
             android:id="@+id/quickCheckKeySummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="No application-specific quick-check keys configured."
+            android:layout_marginTop="@dimen/spacing_m"
+            android:text="@string/app_keys_none"
             android:textIsSelectable="true"
-            android:textSize="15sp"
+            android:textSize="@dimen/text_size_body"
             android:typeface="monospace" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:layout_marginTop="@dimen/section_margin_top"
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="PICC MASTER KEY"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="4dp" />
+            android:text="@string/section_picc_master_key"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/spacing_xs" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:textSize="15sp"
-            android:text="Required for Format and Factory Reset operations." />
+            android:layout_marginBottom="@dimen/section_margin_bottom"
+            android:textSize="@dimen/text_size_body"
+            android:text="@string/picc_key_description" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/setPiccKey"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Set PICC master key" />
+            android:text="@string/action_set_picc_key" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/clearPiccKey"
-            android:backgroundTint="?attr/colorError"
-            android:textColor="?attr/colorOnError"
+            style="@style/Widget.App.Button.Danger"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Clear PICC master key" />
+            android:layout_marginTop="@dimen/spacing_s"
+            android:text="@string/action_clear_picc_key" />
 
         <TextView
             android:id="@+id/piccKeySummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="No PICC master key configured."
+            android:layout_marginTop="@dimen/spacing_m"
+            android:text="@string/picc_key_none"
             android:textIsSelectable="true"
-            android:textSize="15sp"
+            android:textSize="@dimen/text_size_body"
             android:typeface="monospace" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:layout_marginTop="@dimen/section_margin_top"
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="AUTORUN"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="4dp" />
+            android:text="@string/section_autorun"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/spacing_xs" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
+            android:layout_marginBottom="@dimen/spacing_xs">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Execute selected action automatically on card contact"
-                android:textSize="14sp" />
+                android:text="@string/autorun_label"
+                android:textSize="@dimen/text_size_body" />
 
-            <com.google.android.material.switchmaterial.SwitchMaterial
+            <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/autorunSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp" />
+                android:layout_marginStart="@dimen/spacing_s" />
 
         </LinearLayout>
 
         <TextView
+            android:id="@+id/autorunCurrentAction"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="15sp"
-            android:textColor="?attr/colorError"
-            android:text="⚠  With autorun on, read and write actions start on card contact. Destructive actions still require confirmation."
-            android:layout_marginBottom="8dp" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:textSize="@dimen/text_size_body"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:layout_marginBottom="@dimen/spacing_xs" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SOUND"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="4dp" />
+            android:textSize="@dimen/text_size_body"
+            android:textColor="?attr/colorError"
+            android:text="@string/autorun_safety_warning"
+            android:layout_marginBottom="@dimen/spacing_s" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="@dimen/section_margin_top"
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/section_sound"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/spacing_xs" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
+            android:layout_marginBottom="@dimen/spacing_xs">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Play sound on action success / failure"
-                android:textSize="14sp" />
+                android:text="@string/sound_label"
+                android:textSize="@dimen/text_size_body" />
 
-            <com.google.android.material.switchmaterial.SwitchMaterial
+            <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/soundSwitch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp" />
+                android:layout_marginStart="@dimen/spacing_s" />
 
         </LinearLayout>
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:layout_marginTop="@dimen/section_margin_top"
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="INFO"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="8dp" />
+            android:text="@string/section_info"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/section_margin_bottom" />
 
         <TextView
             android:id="@+id/versionInfo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textIsSelectable="true"
-            android:textSize="15sp"
+            android:textSize="@dimen/text_size_body"
             android:typeface="monospace" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="16dp"
-            android:background="?attr/colorControlNormal"
-            android:alpha="0.2" />
+            android:layout_marginTop="@dimen/section_margin_top"
+            android:layout_marginBottom="@dimen/spacing_l"
+            android:background="?attr/colorOutlineVariant" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="DEBUG"
-            android:textStyle="bold"
-            android:textSize="16sp"
-            android:letterSpacing="0.1"
-            android:textColor="@color/brand_blue_text"
-            android:layout_marginBottom="8dp" />
+            android:text="@string/section_debug"
+            android:textAppearance="@style/TextAppearance.App.SectionLabel"
+            android:layout_marginBottom="@dimen/section_margin_bottom" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/exportLog"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Export log (zip)" />
+            android:text="@string/action_export_log" />
 
     </LinearLayout>
 </ScrollView>

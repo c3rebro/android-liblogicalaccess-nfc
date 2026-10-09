@@ -15,7 +15,9 @@ data class ScanHistoryItem(
     val detectedPiccKeyLabel: String? = null,
     val savedCardText: String? = null,
     val savedEnvironmentText: String? = null,
-    var isExpanded: Boolean = false
+    var isExpanded: Boolean = false,
+    var isRawExpanded: Boolean = false,
+    var suggestionsHidden: Boolean = false
 )
 
 fun ScanHistoryItem.cardText(): String {

@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import de.shansen.liblogicalaccessnfc.databinding.FragmentResultsBinding
 
 class ResultsFragment : Fragment() {
@@ -34,15 +35,47 @@ class ResultsFragment : Fragment() {
         runCatching { store.load() }.onSuccess { scanHistory = it }.onFailure {
             android.widget.Toast.makeText(requireContext(), "Scan history could not be read.", android.widget.Toast.LENGTH_LONG).show()
         }
-        adapter = ScanHistoryAdapter(scanHistory, { main.exportScanPdf(it) }, { persistHistory() })
+
+        adapter = ScanHistoryAdapter(
+            onExportPdf = { main.exportScanPdf(it) },
+            onToggleExpand = { item ->
+                val idx = scanHistory.indexOfFirst { it.uid == item.uid && it.timestamp == item.timestamp }
+                if (idx >= 0) {
+                    scanHistory[idx].isExpanded = !scanHistory[idx].isExpanded
+                    persistHistory()
+                    submitHistory()
+                }
+            },
+            onToggleRaw = { item ->
+                val idx = scanHistory.indexOfFirst { it.uid == item.uid && it.timestamp == item.timestamp }
+                if (idx >= 0) {
+                    scanHistory[idx].isRawExpanded = !scanHistory[idx].isRawExpanded
+                    submitHistory()
+                }
+            },
+            onAddKey = { aid -> main.showAddQuickCheckKeyDialog(aid) },
+            onRescanOnce = { main.rescanOnce() },
+            onDismissSuggestions = { item ->
+                val idx = scanHistory.indexOfFirst { it.uid == item.uid && it.timestamp == item.timestamp }
+                if (idx >= 0) {
+                    scanHistory[idx].suggestionsHidden = true
+                    submitHistory()
+                }
+            }
+        )
+        submitHistory()
+
         binding.exportAllScans.setOnClickListener { main.exportAllScansPdf(scanHistory.toList()) }
         binding.clearHistory.setOnClickListener {
-            androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle("Clear scan history?")
-                .setMessage("All stored scan results will be deleted. Saved keys are kept.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear") { _, _ ->
-                    scanHistory.clear(); persistHistory(); adapter.notifyDataSetChanged(); updateEmptyState()
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.confirm_clear_history_title)
+                .setMessage(R.string.confirm_clear_history_message)
+                .setNegativeButton(R.string.btn_cancel, null)
+                .setPositiveButton(R.string.btn_clear) { _, _ ->
+                    scanHistory.clear()
+                    persistHistory()
+                    adapter.submitList(emptyList())
+                    updateEmptyState()
                 }.show()
         }
         binding.scanHistoryList.layoutManager = LinearLayoutManager(requireContext())
@@ -61,9 +94,13 @@ class ResultsFragment : Fragment() {
         item.isExpanded = true
         scanHistory.add(0, item)
         persistHistory()
-        adapter.notifyDataSetChanged()
+        submitHistory()
         binding.scanHistoryList.scrollToPosition(0)
         updateEmptyState()
+    }
+
+    private fun submitHistory() {
+        adapter.submitList(scanHistory.map { it.copy() })
     }
 
     private fun persistHistory() {

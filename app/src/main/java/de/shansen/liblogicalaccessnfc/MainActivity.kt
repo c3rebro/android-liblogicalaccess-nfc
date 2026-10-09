@@ -10,21 +10,23 @@ import android.nfc.tech.MifareUltralight
 import android.nfc.tech.NfcA
 import de.shansen.rfcard.MifareIdentification
 import android.os.Bundle
-import android.view.View
 import android.text.Editable
 import android.text.InputFilter
 import android.text.TextWatcher
-import android.widget.AdapterView
+import android.view.View
 import android.widget.ArrayAdapter
-import androidx.lifecycle.ViewModelProvider
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.color.MaterialColors
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import de.shansen.liblogicalaccessnfc.databinding.ActivityMainBinding
 import de.shansen.liblogicalaccessnfc.databinding.DialogDesfireQuickCheckKeyBinding
 import de.shansen.rfcard.DesfireAuthenticate
@@ -35,7 +37,6 @@ import de.shansen.rfcard.DesfireKeyType
 import de.shansen.rfidgearruntime.DesfireQuickCheckConfig
 import de.shansen.rfidgearruntime.DesfireQuickCheckKey
 import de.shansen.rfidgearruntime.DesfireQuickCheckKeyFactory
-import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocument
 import de.shansen.rfidgearruntime.DesfireQuickCheckReportDocumentFactory
 import de.shansen.rfidgearruntime.DesfireQuickCheckReportEnvironment
 import de.shansen.rfidgearruntime.DesfireQuickCheckService
@@ -44,14 +45,11 @@ import de.shansen.rfusecase.DesfireFactoryResetAuthorization
 import de.shansen.rfusecase.DesfireFactoryResetUseCase
 import de.shansen.rfusecase.DesfireFormatAuthorization
 import de.shansen.rfusecase.DesfireFormatUseCase
+import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.util.concurrent.CompletableFuture
 
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
-
-    enum class ActiveScanUseCase {
-        QUICK_CHECK, RESTORE_TRANSPORT_CONFIG, FORMAT, FACTORY_RESET
-    }
 
     private lateinit var binding: ActivityMainBinding
     private var nfcAdapter: NfcAdapter? = null
@@ -66,27 +64,39 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         DefaultPiccCandidate("AES zeros (non-factory key type)") { DesfireKey(ByteArray(16), DesfireKeyType.AES, 0, 0) }
     )
 
-    private val session by lazy { ViewModelProvider(this)[AppSessionState::class.java] }
+    internal val sessionState by lazy { ViewModelProvider(this)[AppSessionState::class.java] }
     private val preferences by lazy { getSharedPreferences("app-state", MODE_PRIVATE) }
     private val savedKeys by lazy { SavedKeyStore(this) }
+
     var quickCheckConfig: DesfireQuickCheckConfig
-        get() = session.config
-        private set(value) { session.config = value }
+        get() = sessionState.config
+        private set(value) { sessionState.config = value }
     var piccMasterKeyLabel: String?
-        get() = session.piccLabel
-        private set(value) { session.piccLabel = value }
+        get() = sessionState.piccLabel
+        private set(value) { sessionState.piccLabel = value }
     var piccMasterKey: DesfireKey?
-        get() = session.piccKey
-        private set(value) { session.piccKey = value }
-    var activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
-        internal set(value) {
-            field = value
+        get() = sessionState.piccKey
+        private set(value) { sessionState.piccKey = value }
+
+    private var activeScanUseCase: ActiveScanUseCase
+        get() = sessionState.uiState.value.selectedAction
+        set(value) {
+            sessionState.updateUiState { it.copy(selectedAction = value) }
             preferences.edit().putString("active-action", value.name).apply()
         }
 
     var autorunEnabled: Boolean
-        get() = preferences.getBoolean("autorun-enabled", false)
-        set(value) { preferences.edit().putBoolean("autorun-enabled", value).apply() }
+        get() = sessionState.uiState.value.autorunEnabled
+        set(value) {
+            sessionState.updateUiState { it.copy(autorunEnabled = value) }
+            preferences.edit().putBoolean("autorun-enabled", value).apply()
+        }
+
+    val runMode: RunMode get() = if (autorunEnabled) RunMode.AUTO_REPEAT else RunMode.MANUAL_ONE_SHOT
+
+    private var armState: ArmState
+        get() = sessionState.uiState.value.armState
+        set(value) { sessionState.updateUiState { it.copy(armState = value) } }
 
     var soundEnabled: Boolean
         get() = preferences.getBoolean("sound-enabled", false)
@@ -95,7 +105,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var actionsFragment: ActionsFragment
     private lateinit var resultsFragment: ResultsFragment
     private lateinit var settingsFragment: SettingsFragment
-
 
     private val openProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) actionsFragment.loadProjectFromUri(uri)
@@ -131,7 +140,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         ActivityResultContracts.CreateDocument("application/pdf")
     ) { uri ->
         if (uri == null) return@registerForActivityResult
-        val lines = session.pendingPdfLines ?: return@registerForActivityResult
+        val lines = sessionState.pendingPdfLines ?: return@registerForActivityResult
         Thread {
             val result = runCatching {
                 contentResolver.openOutputStream(uri)?.use { output ->
@@ -140,9 +149,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
             runOnUiThread {
                 result.onSuccess {
-                    actionsFragment.updateStatus("Quick Check PDF exported.")
+                    setNfcStatus("Quick Check PDF exported.")
                 }.onFailure { error ->
-                    actionsFragment.updateStatus("PDF export failed: ${error.message ?: error.javaClass.simpleName}")
+                    setNfcStatus("PDF export failed: ${error.message ?: error.javaClass.simpleName}")
                 }
             }
         }.start()
@@ -152,10 +161,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         super.onCreate(savedInstanceState)
         AppLogger.init(this)
         AppLogger.log("APP", "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) commit=${BuildConfig.GIT_COMMIT} bridge=${NativeBridge.version()}")
-        activeScanUseCase = runCatching {
+
+        val savedAction = runCatching {
             ActiveScanUseCase.valueOf(preferences.getString("active-action", "QUICK_CHECK")!!)
         }.getOrDefault(ActiveScanUseCase.QUICK_CHECK)
-        if (!session.loaded) {
+        val savedAutorun = preferences.getBoolean("autorun-enabled", false)
+
+        if (!sessionState.loaded) {
             runCatching { savedKeys.load() }.onSuccess { entries ->
                 entries.forEach { entry ->
                     if (entry.aid == null) {
@@ -163,11 +175,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     } else quickCheckConfig = quickCheckConfig.withApplicationKey(entry.aid,
                         DesfireQuickCheckKey(entry.label, entry.key))
                 }
-                session.loaded = true
+                sessionState.loaded = true
             }.onFailure {
                 android.widget.Toast.makeText(this, "Saved keys could not be unlocked. Re-enter them in Settings.", android.widget.Toast.LENGTH_LONG).show()
             }
         }
+
+        // Seed StateFlow before fragments are committed so onViewCreated sees correct state.
+        val nfcStatus = when {
+            NfcAdapter.getDefaultAdapter(this) == null -> "This device has no NFC adapter."
+            NfcAdapter.getDefaultAdapter(this)?.isEnabled != true -> "NFC is disabled."
+            else -> "Ready. Hold an NFC card near the phone to identify it."
+        }
+        sessionState.updateUiState { it.copy(selectedAction = savedAction, autorunEnabled = savedAutorun, nfcStatus = nfcStatus) }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -200,36 +221,35 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             showFragment(item.itemId)
             true
         }
-
         binding.bottomNav.selectedItemId = preferences.getInt("selected-menu", R.id.nav_actions)
-        actionsFragment.updateUseCaseSummary()
-        updateAutorunWarning()
+
+        // Observe UI state to drive the autorun banner
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                sessionState.uiState.collect { state ->
+                    updateAutorunBannerFromState(state)
+                }
+            }
+        }
 
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
-        val nfcStatus = when {
-            nfcAdapter == null -> "This device has no NFC adapter."
-            nfcAdapter?.isEnabled != true -> "NFC is disabled."
-            else -> "Ready. Hold an NFC card near the phone to identify it."
-        }
-        actionsFragment.updateStatus(nfcStatus)
     }
 
     override fun onResume() {
         super.onResume()
-        nfcAdapter?.enableReaderMode(
-            this,
-            this,
-            NfcAdapter.FLAG_READER_NFC_A or
-                NfcAdapter.FLAG_READER_NFC_B or
-                NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-            Bundle().apply {
-                putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250)
-            }
-        )
+        // NFC reader mode is NOT automatically re-enabled here.
+        // The user must tap the arm button on the Actions screen to start scanning.
     }
 
     override fun onPause() {
         nfcAdapter?.disableReaderMode(this)
+        when (armState) {
+            is ArmState.Armed, is ArmState.WaitingForRemoval, is ArmState.Running -> {
+                armState = ArmState.PausedAfterBackground
+                sessionState.destructiveAutorunConfirmed = false
+            }
+            else -> {}
+        }
         super.onPause()
     }
 
@@ -246,44 +266,203 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         tx.commit()
     }
 
+    private fun updateAutorunBannerFromState(state: MainUiState) {
+        val runMode = if (state.autorunEnabled) RunMode.AUTO_REPEAT else RunMode.MANUAL_ONE_SHOT
+        val armState = state.armState
+        val isAutoActive = runMode == RunMode.AUTO_REPEAT &&
+            (armState is ArmState.Armed || armState is ArmState.WaitingForRemoval)
+        val isPaused = armState is ArmState.PausedAfterBackground
+
+        when {
+            isPaused -> {
+                val bg = MaterialColors.getColor(binding.autorunWarning, com.google.android.material.R.attr.colorSurfaceVariant)
+                val fg = MaterialColors.getColor(binding.autorunWarning, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                binding.autorunWarning.setBackgroundColor(bg)
+                binding.autorunWarning.setTextColor(fg)
+                binding.autorunWarning.text = "Auto mode paused — open Actions to resume"
+                binding.autorunWarning.visibility = View.VISIBLE
+                binding.autorunWarning.setOnClickListener {
+                    binding.bottomNav.selectedItemId = R.id.nav_actions
+                }
+            }
+            isAutoActive -> {
+                val isDestructive = isDestructiveAction(state.selectedAction)
+                val isWrite = state.selectedAction == ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG
+                val (bg, fg, prefix) = when {
+                    isDestructive -> Triple(
+                        MaterialColors.getColor(binding.autorunWarning, com.google.android.material.R.attr.colorError),
+                        MaterialColors.getColor(binding.autorunWarning, com.google.android.material.R.attr.colorOnError),
+                        "⚠ Auto"
+                    )
+                    isWrite -> Triple(
+                        getColor(R.color.color_warning),
+                        getColor(R.color.color_on_warning),
+                        "⚠ Auto"
+                    )
+                    else -> Triple(
+                        MaterialColors.getColor(binding.autorunWarning, com.google.android.material.R.attr.colorSecondaryContainer),
+                        MaterialColors.getColor(binding.autorunWarning, com.google.android.material.R.attr.colorOnSecondaryContainer),
+                        "Auto"
+                    )
+                }
+                binding.autorunWarning.setBackgroundColor(bg)
+                binding.autorunWarning.setTextColor(fg)
+                binding.autorunWarning.text = "$prefix: ${actionDisplayLabel(state.selectedAction)}"
+                binding.autorunWarning.visibility = View.VISIBLE
+                binding.autorunWarning.setOnClickListener { disarm() }
+            }
+            else -> {
+                binding.autorunWarning.visibility = View.GONE
+                binding.autorunWarning.setOnClickListener(null)
+            }
+        }
+    }
+
+    // --- Arm / disarm ---
+
+    /** Arms the NFC scanner. Shows a confirmation dialog first for destructive AUTO_REPEAT. */
+    fun arm() {
+        val readiness = checkAutorunReadiness()
+        if (readiness != null) {
+            android.widget.Toast.makeText(this, readiness, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        if (runMode == RunMode.AUTO_REPEAT && isDestructiveAction(activeScanUseCase) &&
+            !sessionState.destructiveAutorunConfirmed
+        ) {
+            showDestructiveAutorunConfirmation(
+                actionLabel = actionDisplayLabel(activeScanUseCase),
+                onConfirmed = {
+                    sessionState.destructiveAutorunConfirmed = true
+                    performArm()
+                },
+                onDeclined = {}
+            )
+            return
+        }
+        performArm()
+    }
+
+    private fun performArm() {
+        armState = ArmState.Armed
+        nfcAdapter?.enableReaderMode(
+            this, this,
+            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+            Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) }
+        )
+        AppLogger.log("ARM", "Armed; action=${activeScanUseCase.name} runMode=${runMode.name}")
+    }
+
+    fun disarm() {
+        armState = ArmState.Disarmed
+        sessionState.destructiveAutorunConfirmed = false
+        nfcAdapter?.disableReaderMode(this)
+        AppLogger.log("ARM", "Disarmed")
+    }
+
+    /** Arms a single-shot Quick Check regardless of current autorun setting. */
+    fun rescanOnce() {
+        if (activeScanUseCase != ActiveScanUseCase.QUICK_CHECK) {
+            activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
+        }
+        sessionState.rescanOncePending = true
+        when (armState) {
+            is ArmState.Armed, is ArmState.WaitingForRemoval, is ArmState.Running -> {
+                // Already in position; rescanOncePending flag ensures one-shot exit
+            }
+            else -> {
+                armState = ArmState.Armed
+                nfcAdapter?.enableReaderMode(
+                    this, this,
+                    NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                    Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) }
+                )
+            }
+        }
+        binding.bottomNav.selectedItemId = R.id.nav_actions
+        AppLogger.log("ARM", "Rescan once armed; action=QUICK_CHECK")
+    }
+
     // --- Methods called by ActionsFragment ---
 
     fun selectQuickCheckUseCase() {
+        disarmIfActive()
         activeScanUseCase = ActiveScanUseCase.QUICK_CHECK
-        actionsFragment.updateUseCaseSummary()
-        updateAutorunWarning()
         AppLogger.log("ACTION", "Selected: Quick Check")
-        actionsFragment.updateStatus("Quick Check selected. Hold a DESFire card near the phone.")
+        setNfcStatus("Quick Check selected.")
     }
 
     fun selectRestoreTransportUseCase() {
+        disarmIfActive()
         activeScanUseCase = ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG
-        actionsFragment.updateUseCaseSummary()
-        updateAutorunWarning()
         AppLogger.log("ACTION", "Selected: Restore Transport Config")
-        actionsFragment.updateStatus("Restore Transport Config selected. Present the DESFire card.")
+        setNfcStatus("Restore Transport Config selected.")
     }
 
     fun selectFormatUseCase() {
+        disarmIfActive()
+        val wasAutorun = autorunEnabled
+        if (wasAutorun) {
+            autorunEnabled = false
+            sessionState.destructiveAutorunConfirmed = false
+        }
         activeScanUseCase = ActiveScanUseCase.FORMAT
-        actionsFragment.updateUseCaseSummary()
-        updateAutorunWarning()
-        AppLogger.log("ACTION", "Selected: Format")
-        actionsFragment.updateStatus("Format selected. Present the DESFire card — a confirmation dialog will appear.")
+        AppLogger.log("ACTION", "Selected: Format${if (wasAutorun) "; auto-repeat disabled (destructive)" else ""}")
+        setNfcStatus(if (wasAutorun)
+            "Format selected. Auto-repeat was disabled — re-enable in Settings for repeat mode."
+        else
+            "Format selected. Tap 'Wait for card' — a confirmation dialog will appear.")
     }
 
     fun selectFactoryResetUseCase() {
+        disarmIfActive()
+        val wasAutorun = autorunEnabled
+        if (wasAutorun) {
+            autorunEnabled = false
+            sessionState.destructiveAutorunConfirmed = false
+        }
         activeScanUseCase = ActiveScanUseCase.FACTORY_RESET
-        actionsFragment.updateUseCaseSummary()
-        updateAutorunWarning()
-        AppLogger.log("ACTION", "Selected: Factory Reset")
-        actionsFragment.updateStatus("Factory Reset selected. Present the DESFire card — a confirmation dialog will appear.")
+        AppLogger.log("ACTION", "Selected: Factory Reset${if (wasAutorun) "; auto-repeat disabled (destructive)" else ""}")
+        setNfcStatus(if (wasAutorun)
+            "Factory Reset selected. Auto-repeat was disabled — re-enable in Settings for repeat mode."
+        else
+            "Factory Reset selected. Tap 'Wait for card' — a confirmation dialog will appear.")
     }
 
-    fun applyAutorun(enabled: Boolean) {
+    private fun disarmIfActive() {
+        when (armState) {
+            is ArmState.Armed, is ArmState.WaitingForRemoval, is ArmState.PausedAfterBackground -> disarm()
+            else -> {}
+        }
+    }
+
+    fun applyAutorun(enabled: Boolean, onDeclined: (() -> Unit)? = null) {
+        if (!enabled && (armState is ArmState.Armed || armState is ArmState.WaitingForRemoval)) {
+            disarm()
+        }
         autorunEnabled = enabled
-        updateAutorunWarning()
-        AppLogger.log("SETTINGS", "Autorun ${if (enabled) "enabled" else "disabled"} for action=${activeScanUseCase.name}")
+        if (!enabled) sessionState.destructiveAutorunConfirmed = false
+        AppLogger.log("SETTINGS", "Auto-repeat ${if (enabled) "enabled" else "disabled"} for action=${activeScanUseCase.name}")
+    }
+
+    internal fun isDestructiveAction(action: ActiveScanUseCase): Boolean =
+        action == ActiveScanUseCase.FORMAT || action == ActiveScanUseCase.FACTORY_RESET
+
+    private fun actionDisplayLabel(action: ActiveScanUseCase): String = when (action) {
+        ActiveScanUseCase.QUICK_CHECK -> "Quick Check (read-only)"
+        ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG -> "Restore Transport Config"
+        ActiveScanUseCase.FORMAT -> "Format DESFire card"
+        ActiveScanUseCase.FACTORY_RESET -> "Factory Reset DESFire card"
+    }
+
+    private fun showDestructiveAutorunConfirmation(actionLabel: String, onConfirmed: () -> Unit, onDeclined: () -> Unit) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.dialog_title_destructive_autorun)
+            .setMessage(getString(R.string.msg_destructive_autorun_confirm, actionLabel))
+            .setPositiveButton(R.string.btn_enable) { _, _ -> onConfirmed() }
+            .setNegativeButton(R.string.btn_cancel) { _, _ -> onDeclined() }
+            .setOnCancelListener { onDeclined() }
+            .show()
     }
 
     fun checkAutorunReadiness(): String? = when (activeScanUseCase) {
@@ -293,33 +472,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         ActiveScanUseCase.FORMAT, ActiveScanUseCase.FACTORY_RESET -> null
     }
 
-    fun updateAutorunWarning() {
-        if (!autorunEnabled) {
-            binding.autorunWarning.visibility = View.GONE
-            return
-        }
-        val label = when (activeScanUseCase) {
-            ActiveScanUseCase.QUICK_CHECK -> "Quick Check (read-only)"
-            ActiveScanUseCase.RESTORE_TRANSPORT_CONFIG -> "Restore PICC Transport Config (write)"
-            ActiveScanUseCase.FORMAT -> "Format DESFire card ⚠ DESTRUCTIVE"
-            ActiveScanUseCase.FACTORY_RESET -> "Factory Reset DESFire card ⚠ DESTRUCTIVE"
-        }
-        binding.autorunWarning.text = when (activeScanUseCase) {
-            ActiveScanUseCase.FORMAT, ActiveScanUseCase.FACTORY_RESET ->
-                "⚠  AUTORUN: card contact will request confirmation for  $label"
-            else -> "⚠  AUTORUN: card contact will execute  $label"
-        }
-        binding.autorunWarning.visibility = View.VISIBLE
-    }
-
     private fun playSuccessSound() {
         if (!soundEnabled) return
         Thread {
             try {
                 ToneGenerator(AudioManager.STREAM_MUSIC, 80).apply {
-                    startTone(ToneGenerator.TONE_PROP_BEEP, 120)
-                    Thread.sleep(250)
-                    startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+                    startTone(ToneGenerator.TONE_PROP_BEEP, 200)
                     Thread.sleep(300)
                     release()
                 }
@@ -349,20 +507,23 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     fun showAddQuickCheckKeyDialog(prefillAid: Int? = null) {
         val dialogBinding = DialogDesfireQuickCheckKeyBinding.inflate(layoutInflater)
         val keyTypes = listOf(DesfireKeyType.AES, DesfireKeyType.TDES_3K, DesfireKeyType.DES)
-        dialogBinding.keyType.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            keyTypes.map(::keyTypeLabel)
+        val keyTypeLabels = keyTypes.map(::keyTypeLabel)
+
+        dialogBinding.keyType.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_list_item_1, keyTypeLabels)
         )
+        dialogBinding.keyType.setText(keyTypeLabels[0], false)
         prefillAid?.let { dialogBinding.aid.setText("0x%06X".format(it)) }
+
+        fun selectedKeyType() = keyTypes[keyTypeLabels.indexOf(dialogBinding.keyType.text.toString()).coerceAtLeast(0)]
 
         val hexFilter = InputFilter { source, _, _, _, _, _ ->
             val filtered = source.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
             if (filtered.length == source.length) null else filtered.toString()
         }
         fun updateHexCounter() {
-            val max = if (keyTypes[dialogBinding.keyType.selectedItemPosition] == DesfireKeyType.TDES_3K) 48 else 32
-            val len = dialogBinding.keyHex.text.length
+            val max = if (selectedKeyType() == DesfireKeyType.TDES_3K) 48 else 32
+            val len = dialogBinding.keyHex.text?.length ?: 0
             dialogBinding.keyHex.filters = arrayOf(hexFilter, InputFilter.LengthFilter(max))
             dialogBinding.hexCounter.text = "$len / $max hex chars"
             dialogBinding.hexCounter.setTypeface(null,
@@ -374,29 +535,26 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) { updateHexCounter() }
         })
-        dialogBinding.keyType.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) { updateHexCounter() }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        dialogBinding.keyType.setOnItemClickListener { _, _, _, _ -> updateHexCounter() }
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("DESFire application key")
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.dialog_title_app_key)
             .setView(dialogBinding.root)
-            .setPositiveButton("Add", null)
-            .setNegativeButton("Cancel", null)
+            .setPositiveButton(R.string.btn_add, null)
+            .setNegativeButton(R.string.btn_cancel, null)
             .create()
 
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                dialogBinding.label.error = null
-                dialogBinding.keyHex.error = null
-                dialogBinding.keyNumber.error = null
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                dialogBinding.tilLabel.error = null
+                dialogBinding.tilKeyHex.error = null
+                dialogBinding.tilKeyNumber.error = null
 
                 val result = runCatching {
                     val aid = DesfireQuickCheckKeyFactory.parseAid(dialogBinding.aid.text.toString())
                     val keyNo = dialogBinding.keyNumber.text.toString().trim().toIntOrNull()
                         ?: throw IllegalArgumentException("Key number must be a decimal number between 0 and 15.")
-                    val type = keyTypes[dialogBinding.keyType.selectedItemPosition]
+                    val type = selectedKeyType()
                     val key = DesfireQuickCheckKeyFactory.fromHex(
                         label = dialogBinding.label.text.toString(),
                         keyHex = dialogBinding.keyHex.text.toString(),
@@ -410,7 +568,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     if (dialogBinding.savePermanently.isChecked) {
                         val saved = runCatching { savedKeys.save(aid, key.label, key.key) }
                         if (saved.isFailure) {
-                            dialogBinding.keyHex.error = "Unable to save securely. Try adding a session key instead."
+                            dialogBinding.tilKeyHex.error = "Unable to save securely. Try adding a session key instead."
                             key.key.clear()
                             return@onSuccess
                         }
@@ -418,14 +576,14 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     quickCheckConfig = quickCheckConfig.withApplicationKey(aid, key)
                     AppLogger.log("KEY", "App key added: '${key.label}' AID=0x%06X type=${key.key.type} #${key.key.number} permanent=${dialogBinding.savePermanently.isChecked}".format(aid))
                     settingsFragment.updateKeySummaries()
-                    actionsFragment.updateStatus("Key added for AID 0x%06X.".format(aid))
+                    setNfcStatus("Key added for AID 0x%06X.".format(aid))
                     dialog.dismiss()
                 }.onFailure { error ->
                     val msg = error.message ?: "Invalid DESFire key."
                     when {
-                        msg.startsWith("Key label") -> dialogBinding.label.error = msg
-                        msg.startsWith("DESFire key number") -> dialogBinding.keyNumber.error = msg
-                        else -> dialogBinding.keyHex.error = msg
+                        msg.startsWith("Key label") -> dialogBinding.tilLabel.error = msg
+                        msg.startsWith("DESFire key number") -> dialogBinding.tilKeyNumber.error = msg
+                        else -> dialogBinding.tilKeyHex.error = msg
                     }
                 }
             }
@@ -482,13 +640,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     // --- Methods called by ResultsFragment ---
 
     fun exportScanPdf(item: ScanHistoryItem) {
-        session.pendingPdfLines = item.pdfLines()
+        sessionState.pendingPdfLines = item.pdfLines()
         createQuickCheckPdf.launch("rfidgear-${item.uid}-${item.timestamp}.pdf")
     }
 
     fun exportAllScansPdf(items: List<ScanHistoryItem>) {
         if (items.isEmpty()) return
-        session.pendingPdfLines = buildList {
+        sessionState.pendingPdfLines = buildList {
             add("RFIDGear scan history")
             add("Scans: ${items.size}")
             items.forEachIndexed { index, item ->
@@ -502,6 +660,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     // --- NFC tag handling ---
 
     override fun onTagDiscovered(tag: Tag) {
+        // Guard: only process if Armed
+        if (armState !is ArmState.Armed) {
+            AppLogger.log("NFC", "Tag ${tag.id.toHex()} ignored; armState=${armState::class.simpleName}")
+            return
+        }
+        armState = ArmState.Running
+
         val uidText = tag.id.toHex()
         val techList = tag.techList.toList()
         val scanStart = android.os.SystemClock.elapsedRealtime()
@@ -527,6 +692,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
             AppLogger.log("NFC", "UID=$uidText not ISO-DEP: $label")
             recordIdentification(tag, label, "Not a DESFire ISO-DEP card. $capability")
+            transitionAfterScan(tag)
             return
         }
 
@@ -555,20 +721,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
 
             isoDep.timeout = 5000
-            AppLogger.log("NFC", "UID=$uidText DESFire confirmed, action=${activeScanUseCase.name} autorun=$autorunEnabled exchangeTimeout=5000ms")
+            AppLogger.log("NFC", "UID=$uidText DESFire confirmed, action=${activeScanUseCase.name} runMode=${runMode.name} exchangeTimeout=5000ms")
             NativeBridge.attachTransport(transport)
-
-            if (autorunEnabled) {
-                val readiness = checkAutorunReadiness()
-                if (readiness != null) {
-                    AppLogger.log("NFC", "UID=$uidText autorun blocked: $readiness")
-                    runOnUiThread {
-                        actionsFragment.updateStatus("Autorun blocked: $readiness")
-                        android.widget.Toast.makeText(this@MainActivity, readiness, android.widget.Toast.LENGTH_LONG).show()
-                    }
-                    return
-                }
-            }
 
             when (activeScanUseCase) {
                 ActiveScanUseCase.FORMAT -> {
@@ -587,13 +741,35 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             }
         } catch (e: Exception) {
             AppLogger.log("NFC", "UID=$uidText exception: ${e.javaClass.simpleName} ${e.message}\n${e.stackTraceToString()}")
-            runOnUiThread {
-                actionsFragment.updateStatus("NFC error: ${e.message}")
-            }
+            setNfcStatus("NFC error: ${e.message}")
         } finally {
             NativeBridge.detachTransport()
             try { isoDep.close() } catch (_: Exception) {}
             AppLogger.log("NFC", "UID=$uidText ISO-DEP closed; scan elapsed=${android.os.SystemClock.elapsedRealtime() - scanStart}ms")
+            transitionAfterScan(tag)
+        }
+    }
+
+    private fun transitionAfterScan(tag: Tag) {
+        if (armState !is ArmState.Running) return
+        val forceManual = sessionState.rescanOncePending
+        if (forceManual) sessionState.rescanOncePending = false
+
+        if (forceManual || runMode == RunMode.MANUAL_ONE_SHOT) {
+            runOnUiThread {
+                armState = ArmState.Disarmed
+                nfcAdapter?.disableReaderMode(this@MainActivity)
+            }
+        } else {
+            // AUTO_REPEAT: wait for tag removal then re-arm
+            armState = ArmState.WaitingForRemoval
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            nfcAdapter?.ignore(tag, 500, {
+                if (armState is ArmState.WaitingForRemoval) {
+                    armState = ArmState.Armed
+                    AppLogger.log("NFC", "Tag removed; re-armed for AUTO_REPEAT")
+                }
+            }, handler)
         }
     }
 
@@ -619,16 +795,14 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             resultsFragment.addScanResult(ScanHistoryItem(tag.id.toHex(), label, System.currentTimeMillis(),
                 savedCardText = cardText, savedEnvironmentText = environment))
             binding.bottomNav.selectedItemId = R.id.nav_results
-            actionsFragment.updateStatus(message)
+            setNfcStatus(message)
         }
     }
 
     private fun runQuickCheck(tag: Tag, isoDep: IsoDep, techList: List<String>) {
         val uid = tag.id.toHex()
         AppLogger.log("QUICK_CHECK", "UID=$uid start")
-        runOnUiThread {
-            actionsFragment.updateStatus("Quick Check running... keep the card in the NFC field.")
-        }
+        setNfcStatus("Quick Check running… keep the card in the NFC field.")
 
         val scanConfig = buildQuickCheckConfigWithDefaults()
         val report = try {
@@ -646,7 +820,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             )
         )
 
-        // Detection belongs to this card, never to a previously scanned card or the user key.
         val directoryLabel = report.directoryAuthenticatedWith?.label
         val defaultDirectoryLabel = directoryLabel?.takeIf { label -> defaultPiccCandidates.any { it.label == label } }
         val probe = if (defaultDirectoryLabel == null) probeDefaultPiccKey(tag) else null
@@ -655,7 +828,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         probe?.second?.clear()
 
         runOnUiThread {
-
             val item = ScanHistoryItem(
                 uid = tag.id.toHex(),
                 cardLabel = "DESFire",
@@ -668,7 +840,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
             val firstMissingKeyAid = report.needsKeys.firstOrNull()
             val reportError = report.error
-            actionsFragment.updateStatus(when {
+            setNfcStatus(when {
                 reportError != null -> "Quick Check failed: ${report.errorMessage ?: reportError.rfidGearName}"
                 firstMissingKeyAid == null ->
                     "Quick Check complete — PICC key: $detectedPiccLabel."
@@ -678,15 +850,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
             AppLogger.log("QUICK_CHECK", "UID=$uid piccKey='$detectedPiccLabel' error=$reportError missingAids=${report.needsKeys.map { "0x%06X".format(it) }}")
             if (reportError != null) playFailureSound() else playSuccessSound()
-
-            if (firstMissingKeyAid != null && !isFinishing) {
-                showAddQuickCheckKeyDialog(firstMissingKeyAid)
-            }
         }
     }
 
-    /** Builds a Quick Check config that always probes the two factory-default PICC keys first,
-     *  then the user-configured PICC key (if any), then any manually-added piccKeys. */
     private fun buildQuickCheckConfigWithDefaults(): DesfireQuickCheckConfig {
         val allPiccCandidates = buildList {
             defaultPiccCandidates.forEach { add(DesfireQuickCheckKey(it.label, it.create())) }
@@ -698,8 +864,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         return quickCheckConfig.copy(piccKeys = allPiccCandidates)
     }
 
-    /** Tries each default PICC candidate against the card (transport must be attached).
-     *  Returns the candidate label and a fresh key for the first one that authenticates, or null. */
     private fun probeDefaultPiccKey(tag: Tag): Pair<String, DesfireKey>? {
         for (candidate in defaultPiccCandidates) {
             val key = candidate.create()
@@ -716,34 +880,28 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun runFormat(tag: Tag, uidText: String, techList: List<String>) {
         AppLogger.log("FORMAT", "UID=$uidText preflight start")
-        runOnUiThread { actionsFragment.updateStatus("Format preflight running... keep card in field.") }
+        setNfcStatus("Format preflight running… keep card in field.")
 
         val preflightResult = formatUseCase.preflight(NativeDesfireCardBackend(tag.id))
         val preflight = preflightResult.value
 
         if (!preflightResult.isSuccess || preflight == null) {
             AppLogger.log("FORMAT", "UID=$uidText preflight FAILED: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
-            runOnUiThread {
-                actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Format preflight failed: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
-            }
+            setNfcStatus("Format preflight failed: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
             return
         }
 
         val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)?.second
         if (currentKey == null) {
             AppLogger.log("FORMAT", "UID=$uidText no PICC key available")
-            runOnUiThread {
-                actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Format: no default PICC key matched. Configure it in Settings.")
-            }
+            setNfcStatus("Format: no default PICC key matched. Configure it in Settings.")
             return
         }
 
         val confirmed = CompletableFuture<Boolean>()
         runOnUiThread {
             if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setTitle("Format DESFire card?")
                 .setMessage(
                     "UID: ${preflight.identity.uid.toHex()}\n\n" +
@@ -751,23 +909,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     "This cannot be undone.\n\n" +
                     "Keep the card in the NFC field."
                 )
-                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
-                .setPositiveButton("Format") { _, _ -> confirmed.complete(true) }
+                .setNegativeButton(R.string.btn_cancel) { _, _ -> confirmed.complete(false) }
+                .setPositiveButton(R.string.btn_format) { _, _ -> confirmed.complete(true) }
                 .setOnCancelListener { confirmed.complete(false) }
                 .show()
         }
 
         if (!confirmed.get()) {
             AppLogger.log("FORMAT", "UID=$uidText cancelled by user")
-            runOnUiThread {
-                actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Format cancelled.")
-            }
+            setNfcStatus("Format cancelled.")
             return
         }
 
         AppLogger.log("FORMAT", "UID=$uidText confirmed, executing")
-        runOnUiThread { actionsFragment.updateStatus("Executing FORMAT_PICC... keep card in field.") }
+        setNfcStatus("Executing FORMAT_PICC… keep card in field.")
 
         val authorization = DesfireFormatAuthorization.confirm(preflight, preflight.confirmationPhrase)
         val result = formatUseCase.execute(NativeDesfireCardBackend(tag.id), authorization, currentKey)
@@ -776,12 +931,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (result.verifiedSuccess) playSuccessSound() else playFailureSound()
 
         runOnUiThread {
-            actionsFragment.updateUseCaseSummary()
-            actionsFragment.updateStatus(
+            setNfcStatus(
                 if (result.verifiedSuccess) "Format complete: card is empty."
                 else "Format: ${result.message ?: result.status.name}"
             )
-
             val item = ScanHistoryItem(
                 uid = uidText,
                 cardLabel = "DESFire Format",
@@ -795,34 +948,28 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun runFactoryReset(tag: Tag, uidText: String, techList: List<String>) {
         AppLogger.log("FACTORY_RESET", "UID=$uidText preflight start")
-        runOnUiThread { actionsFragment.updateStatus("Factory Reset preflight running... keep card in field.") }
+        setNfcStatus("Factory Reset preflight running… keep card in field.")
 
         val preflightResult = factoryResetUseCase.preflight(NativeDesfireCardBackend(tag.id))
         val preflight = preflightResult.value
 
         if (!preflightResult.isSuccess || preflight == null) {
             AppLogger.log("FACTORY_RESET", "UID=$uidText preflight FAILED: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
-            runOnUiThread {
-                actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Factory Reset preflight failed: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
-            }
+            setNfcStatus("Factory Reset preflight failed: ${preflightResult.message ?: preflightResult.error.rfidGearName}")
             return
         }
 
         val currentKey = piccMasterKey ?: probeDefaultPiccKey(tag)?.second
         if (currentKey == null) {
             AppLogger.log("FACTORY_RESET", "UID=$uidText no PICC key available")
-            runOnUiThread {
-                actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Factory Reset: no default PICC key matched. Configure it in Settings.")
-            }
+            setNfcStatus("Factory Reset: no default PICC key matched. Configure it in Settings.")
             return
         }
 
         val confirmed = CompletableFuture<Boolean>()
         runOnUiThread {
             if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setTitle("Factory Reset DESFire card?")
                 .setMessage(
                     "UID: ${preflight.identity.uid.toHex()}\n\n" +
@@ -831,23 +978,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                     "This cannot be undone.\n\n" +
                     "Keep the card in the NFC field."
                 )
-                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
-                .setPositiveButton("Reset") { _, _ -> confirmed.complete(true) }
+                .setNegativeButton(R.string.btn_cancel) { _, _ -> confirmed.complete(false) }
+                .setPositiveButton(R.string.btn_reset) { _, _ -> confirmed.complete(true) }
                 .setOnCancelListener { confirmed.complete(false) }
                 .show()
         }
 
         if (!confirmed.get()) {
             AppLogger.log("FACTORY_RESET", "UID=$uidText cancelled by user")
-            runOnUiThread {
-                actionsFragment.updateUseCaseSummary()
-                actionsFragment.updateStatus("Factory Reset cancelled.")
-            }
+            setNfcStatus("Factory Reset cancelled.")
             return
         }
 
         AppLogger.log("FACTORY_RESET", "UID=$uidText confirmed, executing")
-        runOnUiThread { actionsFragment.updateStatus("Executing Factory Reset... keep card in field.") }
+        setNfcStatus("Executing Factory Reset… keep card in field.")
 
         val authorization = DesfireFactoryResetAuthorization.confirm(preflight, preflight.confirmationPhrase)
         val result = factoryResetUseCase.execute(NativeDesfireCardBackend(tag.id), authorization, currentKey)
@@ -856,12 +1000,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (result.verifiedSuccess) playSuccessSound() else playFailureSound()
 
         runOnUiThread {
-            actionsFragment.updateUseCaseSummary()
-            actionsFragment.updateStatus(
+            setNfcStatus(
                 if (result.verifiedSuccess) "Factory Reset complete."
                 else "Factory Reset: ${result.message ?: result.status.name}"
             )
-
             val item = ScanHistoryItem(
                 uid = uidText,
                 cardLabel = "DESFire Factory Reset",
@@ -875,12 +1017,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun runRestoreTransportConfig(tag: Tag, uidText: String) {
         AppLogger.log("RESTORE_TRANSPORT", "UID=$uidText start")
-        runOnUiThread { actionsFragment.updateStatus("Restoring PICC transport config... keep card in field.") }
+        setNfcStatus("Restoring PICC transport config… keep card in field.")
 
         val currentKey = piccMasterKey
         if (currentKey == null) {
             AppLogger.log("RESTORE_TRANSPORT", "UID=$uidText no PICC key configured")
-            runOnUiThread { actionsFragment.updateStatus("Restore Transport Config: PICC master key not configured. Set it in Settings.") }
+            setNfcStatus("Restore Transport Config: PICC master key not configured. Set it in Settings.")
             playFailureSound()
             return
         }
@@ -890,7 +1032,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (!connectResult.isSuccess) {
             AppLogger.log("RESTORE_TRANSPORT", "UID=$uidText connect failed")
             backend.disconnect()
-            runOnUiThread { actionsFragment.updateStatus("Restore Transport Config: could not connect to card.") }
+            setNfcStatus("Restore Transport Config: could not connect to card.")
             playFailureSound()
             return
         }
@@ -899,7 +1041,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (!authResult.isSuccess) {
             AppLogger.log("RESTORE_TRANSPORT", "UID=$uidText authentication failed")
             backend.disconnect()
-            runOnUiThread { actionsFragment.updateStatus("Restore Transport Config: authentication failed. Check PICC master key.") }
+            setNfcStatus("Restore Transport Config: authentication failed. Check PICC master key.")
             playFailureSound()
             return
         }
@@ -917,8 +1059,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (success) playSuccessSound() else playFailureSound()
 
         runOnUiThread {
-            actionsFragment.updateUseCaseSummary()
-            actionsFragment.updateStatus(if (success) "Restore Transport Config complete." else resultText)
+            setNfcStatus(if (success) "Restore Transport Config complete." else resultText)
             val item = ScanHistoryItem(
                 uid = uidText,
                 cardLabel = "DESFire Transport Config Restored",
@@ -939,6 +1080,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         DesfireKeyType.AES -> "AES"
         DesfireKeyType.TDES_3K -> "3K3DES"
         DesfireKeyType.DES -> "DES / 2K3DES"
+    }
+
+    /** Thread-safe: updates StateFlow from any thread; collectors on Main will receive it. */
+    internal fun setNfcStatus(msg: String) {
+        sessionState.updateUiState { it.copy(nfcStatus = msg) }
     }
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
