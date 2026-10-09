@@ -209,7 +209,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val nfcStatus = when {
             nfcAdapter == null -> "This device has no NFC adapter."
             nfcAdapter?.isEnabled != true -> "NFC is disabled."
-            else -> "Ready. Hold a DESFire card near the phone."
+            else -> "Ready. Hold an NFC card near the phone to identify it."
         }
         actionsFragment.updateStatus(nfcStatus)
     }
@@ -304,7 +304,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             ActiveScanUseCase.FORMAT -> "Format DESFire card ⚠ DESTRUCTIVE"
             ActiveScanUseCase.FACTORY_RESET -> "Factory Reset DESFire card ⚠ DESTRUCTIVE"
         }
-        binding.autorunWarning.text = "⚠  AUTORUN: card contact will execute  $label"
+        binding.autorunWarning.text = when (activeScanUseCase) {
+            ActiveScanUseCase.FORMAT, ActiveScanUseCase.FACTORY_RESET ->
+                "⚠  AUTORUN: card contact will request confirmation for  $label"
+            else -> "⚠  AUTORUN: card contact will execute  $label"
+        }
         binding.autorunWarning.visibility = View.VISIBLE
     }
 
@@ -500,6 +504,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     override fun onTagDiscovered(tag: Tag) {
         val uidText = tag.id.toHex()
         val techList = tag.techList.toList()
+        val scanStart = android.os.SystemClock.elapsedRealtime()
         AppLogger.log("NFC", "Tag discovered: UID=$uidText techs=${techList.joinToString()}")
 
         val isoDep = IsoDep.get(tag)
@@ -526,11 +531,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         try {
+            AppLogger.log("NFC", "UID=$uidText connecting ISO-DEP")
             isoDep.connect()
-            isoDep.timeout = 5000
+            isoDep.timeout = 1500
+            val transport = AndroidIsoDepTransport(isoDep) { event ->
+                AppLogger.log("NFC", "UID=$uidText $event")
+            }
+            AppLogger.log("NFC", "UID=$uidText identifying product family; exchange timeout=1500ms")
 
             val family = if (MifareIdentification.legacyPlus(isoDep.historicalBytes))
-                MifareIdentification.Family.PLUS else MifareIdentification.identify(isoDep::transceive)
+                MifareIdentification.Family.PLUS else MifareIdentification.identify(transport::transceive)
+            AppLogger.log(
+                "NFC",
+                "UID=$uidText identification=${family.label} elapsed=${android.os.SystemClock.elapsedRealtime() - scanStart}ms"
+            )
             if (family != MifareIdentification.Family.DESFIRE) {
                 val message = if (family == MifareIdentification.Family.UNKNOWN)
                     "ISO-DEP detected, but the card family could not be confirmed. DESFire actions were not run."
@@ -540,8 +554,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 return
             }
 
-            AppLogger.log("NFC", "UID=$uidText DESFire confirmed, action=${activeScanUseCase.name} autorun=$autorunEnabled")
-            val transport = AndroidIsoDepTransport(isoDep)
+            isoDep.timeout = 5000
+            AppLogger.log("NFC", "UID=$uidText DESFire confirmed, action=${activeScanUseCase.name} autorun=$autorunEnabled exchangeTimeout=5000ms")
             NativeBridge.attachTransport(transport)
 
             if (autorunEnabled) {
@@ -579,6 +593,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         } finally {
             NativeBridge.detachTransport()
             try { isoDep.close() } catch (_: Exception) {}
+            AppLogger.log("NFC", "UID=$uidText ISO-DEP closed; scan elapsed=${android.os.SystemClock.elapsedRealtime() - scanStart}ms")
         }
     }
 
@@ -726,24 +741,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         val confirmed = CompletableFuture<Boolean>()
-        if (autorunEnabled) {
-            confirmed.complete(true)
-        } else {
-            runOnUiThread {
-                if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
-                AlertDialog.Builder(this)
-                    .setTitle("Format DESFire card?")
-                    .setMessage(
-                        "UID: ${preflight.identity.uid.toHex()}\n\n" +
-                        "All applications and files will be permanently deleted.\n" +
-                        "This cannot be undone.\n\n" +
-                        "Keep the card in the NFC field."
-                    )
-                    .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
-                    .setPositiveButton("Format") { _, _ -> confirmed.complete(true) }
-                    .setOnCancelListener { confirmed.complete(false) }
-                    .show()
-            }
+        runOnUiThread {
+            if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
+            AlertDialog.Builder(this)
+                .setTitle("Format DESFire card?")
+                .setMessage(
+                    "UID: ${preflight.identity.uid.toHex()}\n\n" +
+                    "All applications and files will be permanently deleted.\n" +
+                    "This cannot be undone.\n\n" +
+                    "Keep the card in the NFC field."
+                )
+                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
+                .setPositiveButton("Format") { _, _ -> confirmed.complete(true) }
+                .setOnCancelListener { confirmed.complete(false) }
+                .show()
         }
 
         if (!confirmed.get()) {
@@ -809,25 +820,21 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         val confirmed = CompletableFuture<Boolean>()
-        if (autorunEnabled) {
-            confirmed.complete(true)
-        } else {
-            runOnUiThread {
-                if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
-                AlertDialog.Builder(this)
-                    .setTitle("Factory Reset DESFire card?")
-                    .setMessage(
-                        "UID: ${preflight.identity.uid.toHex()}\n\n" +
-                        "All applications and files will be deleted.\n" +
-                        "PICC master key #0 will be reset to the DES zero key.\n" +
-                        "This cannot be undone.\n\n" +
-                        "Keep the card in the NFC field."
-                    )
-                    .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
-                    .setPositiveButton("Reset") { _, _ -> confirmed.complete(true) }
-                    .setOnCancelListener { confirmed.complete(false) }
-                    .show()
-            }
+        runOnUiThread {
+            if (isFinishing) { confirmed.complete(false); return@runOnUiThread }
+            AlertDialog.Builder(this)
+                .setTitle("Factory Reset DESFire card?")
+                .setMessage(
+                    "UID: ${preflight.identity.uid.toHex()}\n\n" +
+                    "All applications and files will be deleted.\n" +
+                    "PICC master key #0 will be reset to the DES zero key.\n" +
+                    "This cannot be undone.\n\n" +
+                    "Keep the card in the NFC field."
+                )
+                .setNegativeButton("Cancel") { _, _ -> confirmed.complete(false) }
+                .setPositiveButton("Reset") { _, _ -> confirmed.complete(true) }
+                .setOnCancelListener { confirmed.complete(false) }
+                .show()
         }
 
         if (!confirmed.get()) {

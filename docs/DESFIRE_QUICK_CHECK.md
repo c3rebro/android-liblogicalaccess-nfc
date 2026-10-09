@@ -76,6 +76,8 @@ Non-ISO-DEP cards are recorded with UID, activation metadata, Android technology
 
 References: [NXP AN10833](https://www.nxp.com/docs/en/application-note/AN10833.pdf), [Android NFC technologies](https://developer.android.com/develop/connectivity/nfc/advanced-nfc).
 
+The rotating application log records scan stages, command instruction codes, exchange byte counts, timings and exception types without APDU payloads or key bytes, and can be exported as a ZIP from Settings. Initial identification exchanges have a 1500 ms timeout and do not retry another framing after a transport failure. Confirmed DESFire operations retain the 5000 ms exchange timeout needed by authenticated operations. This diagnostic log is separate from persistent scan history.
+
 ## Android key UI
 
 The app supports adding an application-specific Quick Check key by AID.

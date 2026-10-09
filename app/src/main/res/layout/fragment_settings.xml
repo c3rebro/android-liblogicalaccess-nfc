@@ -139,7 +139,7 @@
             android:layout_height="wrap_content"
             android:textSize="15sp"
             android:textColor="?attr/colorError"
-            android:text="⚠  With autorun on, destructive and write actions execute immediately — no confirmation dialog."
+            android:text="⚠  With autorun on, read and write actions start on card contact. Destructive actions still require confirmation."
             android:layout_marginBottom="8dp" />
 
         <View

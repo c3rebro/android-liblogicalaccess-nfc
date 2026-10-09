@@ -9,6 +9,8 @@ class MifareIdentificationTest {
     @Test fun productFamilyUsesVersionNotTransport() {
         fun version(type: Int) = byteArrayOf(4, type.toByte(), 1, 3, 0, 0x1A, 5)
         assertEquals(MifareIdentification.Family.DESFIRE, MifareIdentification.fromVersion(version(1)))
+        assertEquals(MifareIdentification.Family.DESFIRE, MifareIdentification.fromVersion(version(0x81)))
+        assertEquals(MifareIdentification.Family.DESFIRE, MifareIdentification.fromVersion(version(0x91)))
         assertEquals(MifareIdentification.Family.PLUS, MifareIdentification.fromVersion(version(2)))
         assertEquals(MifareIdentification.Family.PLUS, MifareIdentification.fromVersion(version(0x82)))
         assertEquals(MifareIdentification.Family.UNKNOWN, MifareIdentification.fromVersion(byteArrayOf(4, 1)))
@@ -50,5 +52,13 @@ class MifareIdentificationTest {
             }
         })
         assertEquals(3, frames)
+    }
+    @Test fun transportFailureDoesNotRetryAnotherFraming() {
+        var calls = 0
+        assertEquals(MifareIdentification.Family.UNKNOWN, MifareIdentification.identify {
+            calls++
+            throw java.io.IOException("Timed out")
+        })
+        assertEquals(1, calls)
     }
 }

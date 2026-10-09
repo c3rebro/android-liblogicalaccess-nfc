@@ -10,8 +10,10 @@ object MifareIdentification {
     }
 
     fun identify(transceive: (ByteArray) -> ByteArray): Family {
-        val wrapped = runCatching { transceive(wrappedCommand(0x60)) }.getOrNull()
-        if (wrapped != null && wrapped.size == 9 && wrapped[7].u8() == 0x91 &&
+        // A timeout/lost card is not an unsupported command response. Do not double
+        // the stall by trying another framing after transport failure.
+        val wrapped = runCatching { transceive(wrappedCommand(0x60)) }.getOrElse { return Family.UNKNOWN }
+        if (wrapped.size == 9 && wrapped[7].u8() == 0x91 &&
             wrapped[8].u8() in listOf(0x00, 0xAF)) {
             val family = fromVersion(wrapped.copyOfRange(0, 7))
             // Finish the read-only chained command before the next operation.
